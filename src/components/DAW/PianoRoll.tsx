@@ -20,19 +20,24 @@ function generateKeys() {
 const KEYS = generateKeys();
 
 export function PianoRoll() {
-  const { clips, tracks, selectedClipId, updateClip, addNote, deleteNote, updateNote } = useDAWStore();
+  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel } = useDAWStore();
   const [clip, setClip] = useState<Clip | null>(null);
+  const [clipTrackColor, setClipTrackColor] = useState<string>('#E2E8F0');
   const scrollRef = useRef<HTMLDivElement>(null);
   const [synthPreview, setSynthPreview] = useState<any>(null);
 
   useEffect(() => {
-    const c = clips.find(c => c.id === selectedClipId);
+    const c = clips.find(c => selectedClipIds.includes(c.id));
     setClip(c || null);
+    if (c) {
+        const t = tracks.find(track => track.id === c.trackId);
+        if (t) setClipTrackColor(t.color);
+    }
     
     // Find matching track and get its synth from Tone.js for preview
     // Note: In a real app we'd expose the synth instance directly or send messages
     // but for now we create a generic preview synth if needed.
-  }, [selectedClipId, clips]);
+  }, [selectedClipIds, clips]);
 
   useEffect(() => {
     // Setup a basic preview synth
@@ -118,6 +123,12 @@ export function PianoRoll() {
     <div className="h-64 sm:h-96 bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-300 dark:border-neutral-800 flex flex-col relative select-none">
       <div className="h-8 bg-neutral-200/80 dark:bg-neutral-800/80 border-b border-neutral-300 dark:border-neutral-800 flex items-center px-4 justify-between shrink-0">
         <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300">PIANO ROLL ({clip.id})</span>
+        <button 
+          onClick={() => setBottomPanel(null)}
+          className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+        >
+          &times;
+        </button>
       </div>
       
       <div className="flex flex-1 overflow-hidden">
@@ -171,7 +182,7 @@ export function PianoRoll() {
                             top: keyIndex * ROW_HEIGHT,
                             width: note.duration * BEAT_WIDTH - 1,
                             height: ROW_HEIGHT - 1,
-                            backgroundColor: clip.color
+                            backgroundColor: clipTrackColor
                         }}
                         onClick={(e) => { e.stopPropagation(); deleteNote(clip.id, note.id); }}
                      />

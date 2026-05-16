@@ -2,6 +2,8 @@ import { create } from 'zustand';
 
 export type TrackType = 'midi' | 'audio';
 export type InstrumentType = 'piano' | 'synth' | 'bass' | 'drum';
+export type ThemeMode = 'dark' | 'light' | 'system';
+export type BottomPanel = 'piano-roll' | 'mixer' | null;
 
 export interface Note {
   id: string;
@@ -13,13 +15,14 @@ export interface Note {
 
 export interface Clip {
   id: string;
+  name?: string;
   trackId: string;
   start: number; // in beats (global timeline)
   duration: number; // in beats
   type: TrackType;
   notes: Note[]; // for midi
   bufferUrl?: string; // for audio
-  color: string;
+  color?: string; // override track color
 }
 
 export interface Track {
@@ -36,26 +39,35 @@ export interface Track {
 
 interface DAWState {
   bpm: number;
+  timeSignature: [number, number];
+  theme: ThemeMode;
   isPlaying: boolean;
   tracks: Track[];
   clips: Clip[];
   selectedTrackId: string | null;
-  selectedClipId: string | null;
-  theme: 'dark' | 'light';
+  selectedClipIds: string[];
   isRecording: boolean;
+  bottomPanel: BottomPanel;
+  zoom: number; // Pixels per beat
   
   // Actions
   setBpm: (bpm: number) => void;
+  setTimeSignature: (ts: [number, number]) => void;
+  setZoom: (zoom: number) => void;
   togglePlay: () => void;
   stop: () => void;
-  toggleTheme: () => void;
+  toggleTheme: (mode?: ThemeMode) => void;
+  setBottomPanel: (panel: BottomPanel) => void;
   loadProject: (data: Partial<DAWState>) => void;
   getProjectData: () => Partial<DAWState>;
   addTrack: (type: TrackType) => void;
   deleteTrack: (id: string) => void;
+  reorderTrack: (id: string, index: number) => void;
   addClip: (trackId: string, start: number) => void;
+  duplicateClip: (clipId: string) => void;
+  deleteClip: (clipId: string) => void;
   selectTrack: (id: string | null) => void;
-  selectClip: (id: string | null) => void;
+  selectClip: (id: string | null, multi?: boolean) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   updateClip: (id: string, updates: Partial<Clip>) => void;
   addNote: (clipId: string, note: Note) => void;
@@ -163,17 +175,35 @@ export const useDAWStore = create<DAWState>((set, get) => ({
     }
   ],
   selectedTrackId: 'track-1',
-  selectedClipId: 'clip-1',
+  selectedClipIds: ['clip-1'],
+  timeSignature: [4, 4] as [number, number],
+  bottomPanel: null,
+  zoom: 20,
 
   setBpm: (bpm) => set({ bpm }),
-  toggleTheme: () => set((state) => {
-    const newTheme = state.theme === 'dark' ? 'light' : 'dark';
-    if (newTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+  setTimeSignature: (ts: [number, number]) => set({ timeSignature: ts }),
+  setZoom: (zoom: number) => set({ zoom }),
+  setBottomPanel: (panel: BottomPanel) => set({ bottomPanel: panel }),
+  toggleTheme: (mode?: ThemeMode) => set((state) => {
+    let newTheme = mode;
+    if (!newTheme) {
+      if (state.theme === 'system') newTheme = 'dark';
+      else if (state.theme === 'dark') newTheme = 'light';
+      else newTheme = 'system';
     }
-    return { theme: newTheme };
+    
+    // Apply theme
+    const root = document.documentElement;
+    root.classList.remove('dark', 'light');
+    if (newTheme === 'system') {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        root.classList.add('dark');
+      }
+    } else if (newTheme === 'dark') {
+      root.classList.add('dark');
+    }
+    
+    return { theme: newTheme! };
   }),
   loadProject: (data) => set((state) => ({
     ...state,
@@ -182,7 +212,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
     clips: data.clips || state.clips,
     isPlaying: false,
     selectedTrackId: null,
-    selectedClipId: null,
+    selectedClipIds: [],
   })),
   getProjectData: () => {
     const state = get();
@@ -207,8 +237,16 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   deleteTrack: (id) => set((state) => ({
       tracks: state.tracks.filter(t => t.id !== id),
       clips: state.clips.filter(c => c.trackId !== id),
-      selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId
+      selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
+      selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id)
   })),
+  reorderTrack: (id, index) => set((state) => {
+    const track = state.tracks.find(t => t.id === id);
+    if (!track) return state;
+    const newTracks = state.tracks.filter(t => t.id !== id);
+    newTracks.splice(index, 0, track);
+    return { tracks: newTracks };
+  }),
   addClip: (trackId, start) => set((state) => {
     const track = state.tracks.find(t => t.id === trackId);
     if (!track) return state;
@@ -221,10 +259,37 @@ export const useDAWStore = create<DAWState>((set, get) => ({
       notes: [],
       color: track.color
     };
-    return { clips: [...state.clips, newClip], selectedClipId: newClip.id };
+    return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
   }),
+  duplicateClip: (clipId) => set((state) => {
+    const clip = state.clips.find(c => c.id === clipId);
+    if (!clip) return state;
+    const newClip: Clip = {
+      ...clip,
+      id: generateId(),
+      start: clip.start + clip.duration
+    };
+    // Deep clone notes
+    if (clip.notes) {
+      newClip.notes = clip.notes.map(n => ({ ...n, id: generateId() }));
+    }
+    return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
+  }),
+  deleteClip: (clipId) => set((state) => ({
+      clips: state.clips.filter(c => c.id !== clipId),
+      selectedClipIds: state.selectedClipIds.filter(id => id !== clipId)
+  })),
   selectTrack: (id) => set({ selectedTrackId: id }),
-  selectClip: (id) => set({ selectedClipId: id }),
+  selectClip: (id, multi = false) => set((state) => {
+    if (!id) return { selectedClipIds: [] };
+    if (multi) {
+      if (state.selectedClipIds.includes(id)) {
+        return { selectedClipIds: state.selectedClipIds.filter(c => c !== id) };
+      }
+      return { selectedClipIds: [...state.selectedClipIds, id] };
+    }
+    return { selectedClipIds: [id] };
+  }),
   updateTrack: (id, updates) => set((state) => ({
     tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t)
   })),
