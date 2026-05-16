@@ -6,7 +6,7 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 
 export function TopBar() {
-  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel } = useDAWStore();
+  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme } = useDAWStore();
   const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState('0:00:000');
   const [bpmInput, setBpmInput] = useState(bpm.toString());
@@ -120,8 +120,31 @@ export function TopBar() {
           </button>
         </div>
 
-        {/* Global Settings */}
         <div className="flex items-center gap-4 bg-neutral-200 dark:bg-neutral-800 rounded-md px-3 py-1.5 h-10">
+          <div className="flex items-center gap-1">
+             <button 
+                title="System Theme"
+                className={`w-6 h-6 rounded flex flex-col items-center justify-center transition-colors ${theme === 'system' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+                onClick={() => toggleTheme('system')}
+             >
+                <div className="text-[10px] font-bold leading-none select-none">A</div>
+             </button>
+             <button 
+                title="Light Theme"
+                className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+                onClick={() => toggleTheme('light')}
+             >
+                <div className="w-3 h-3 rounded-full border-2 border-current bg-white" />
+             </button>
+             <button 
+                title="Dark Theme"
+                className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+                onClick={() => toggleTheme('dark')}
+             >
+                <div className="w-3 h-3 rounded-full border-2 border-current bg-black" />
+             </button>
+          </div>
+          <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase text-neutral-500 font-bold">BPM</span>
             <input 

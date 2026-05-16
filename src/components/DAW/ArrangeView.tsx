@@ -100,7 +100,7 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
   );
 }
 
-function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: React.Key }) {
+function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key }) {
   const { selectClip, selectedClipIds, updateClip, duplicateClip, deleteClip, zoom } = useDAWStore();
   const isSelected = selectedClipIds.includes(clip.id);
   const PIXELS_PER_BEAT = zoom;
@@ -111,9 +111,7 @@ function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('text/plain', clip.id);
     e.dataTransfer.effectAllowed = 'copyMove';
-    // We can store if the alt key was pressed when dragging starts
     if (e.altKey) {
-        // Will be duplicated on drop
         e.dataTransfer.setData('action', 'copy');
     } else {
         e.dataTransfer.setData('action', 'move');
@@ -124,6 +122,11 @@ function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: 
     <div
       draggable
       onDragStart={handleDragStart}
+      onContextMenu={onContextMenu}
+      onDoubleClick={(e) => {
+          e.stopPropagation();
+          useDAWStore.getState().setBottomPanel('piano-roll');
+      }}
       className={`absolute h-20 top-2 rounded-md border-2 overflow-hidden cursor-grab active:cursor-grabbing ${isSelected ? 'border-white z-10 shadow-lg' : 'border-transparent shadow-sm'}`}
       style={{
         left: `${clip.start * PIXELS_PER_BEAT}px`,
@@ -137,7 +140,7 @@ function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: 
           else selectClip(clip.id); 
       }}
     >
-        <div className="px-2 py-1 text-xs font-bold text-black/60 truncate flex justify-between items-center group">
+        <div className="px-2 py-1 text-xs font-bold text-black/60 truncate flex justify-between items-center group relative z-10">
             {isEditing ? (
                 <input 
                     autoFocus
@@ -188,6 +191,62 @@ function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: 
                 ))}
             </div>
         )}
+        
+        {/* Resize Handles */}
+        <div 
+            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/50 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+            onPointerDown={(e) => {
+                e.stopPropagation();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const startX = e.clientX;
+                const startBeat = clip.start;
+                const startDur = clip.duration;
+                
+                const onMove = (moveEvent: PointerEvent) => {
+                    const diffPx = moveEvent.clientX - startX;
+                    const diffBeats = diffPx / PIXELS_PER_BEAT;
+                    const SNAP = 0.25;
+                    const snappedDiff = Math.round(diffBeats / SNAP) * SNAP;
+                    
+                    if (startDur - snappedDiff > 0) {
+                       updateClip(clip.id, { start: startBeat + snappedDiff, duration: startDur - snappedDiff });
+                    }
+                };
+                
+                const onUp = (upEvent: PointerEvent) => {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                };
+                
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+            }}
+        />
+        <div 
+            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/50 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+            onPointerDown={(e) => {
+                e.stopPropagation();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const startX = e.clientX;
+                const startDur = clip.duration;
+                
+                const onMove = (moveEvent: PointerEvent) => {
+                    const diffPx = moveEvent.clientX - startX;
+                    const diffBeats = diffPx / PIXELS_PER_BEAT;
+                    const SNAP = 0.25;
+                    const newDur = Math.max(SNAP, Math.round((startDur + diffBeats) / SNAP) * SNAP);
+                    updateClip(clip.id, { duration: newDur });
+                };
+                
+                const onUp = (upEvent: PointerEvent) => {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                };
+                
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+            }}
+        />
     </div>
   );
 }
@@ -209,9 +268,17 @@ export function ArrangeView() {
       addClip(trackId, beat);
   };
 
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, trackId?: string, beat?: number, clipId?: string } | null>(null);
+
+  useEffect(() => {
+     const hideMenu = () => setContextMenu(null);
+     window.addEventListener('click', hideMenu);
+     return () => window.removeEventListener('click', hideMenu);
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
       if ((e.target as HTMLElement).closest('.cursor-grab')) return; // Ignored if started on clip
-      if (e.button !== 0) return; // Only left click
+      if (e.button !== 0) return; // Only left click // <--- actually maybe we should skip right click context menu from here! Oh it's restricted to left click. Good.
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + containerRef.current.scrollLeft;
@@ -403,14 +470,77 @@ export function ArrangeView() {
                 onDoubleClick={(e) => handleTrackLaneDoubleClick(t.id, e)}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; }}
                 onDrop={(e) => handleDrop(t.id, e)}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    if ((e.target as HTMLElement).closest('.cursor-grab')) return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const SNAP = 0.25;
+                    const beat = Math.floor(clickX / PIXELS_PER_BEAT / SNAP) * SNAP;
+                    setContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, beat });
+                }}
             >
                 {clips.filter(c => c.trackId === t.id).map(c => (
-                    <ClipItem key={c.id} clip={c} trackColor={t.color} />
+                    <ClipItem 
+                        key={c.id} 
+                        clip={c} 
+                        trackColor={t.color} 
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            selectClip(c.id);
+                            setContextMenu({ x: e.clientX, y: e.clientY, clipId: c.id });
+                        }}
+                    />
                 ))}
             </div>
           ))}
         </div>
         
+        {/* Context Menu */}
+        {contextMenu && (
+            <div 
+                className="fixed bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded shadow-xl z-50 py-1 text-sm text-neutral-800 dark:text-neutral-200 min-w-32"
+                style={{ left: contextMenu.x, top: contextMenu.y }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {contextMenu.clipId ? (
+                    <>
+                        <button 
+                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                            onClick={() => {
+                                deleteClip(contextMenu.clipId!);
+                                setContextMenu(null);
+                            }}
+                        >
+                            Delete
+                        </button>
+                        <button 
+                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                            onClick={() => {
+                                duplicateClip(contextMenu.clipId!);
+                                setContextMenu(null);
+                            }}
+                        >
+                            Duplicate
+                        </button>
+                    </>
+                ) : contextMenu.trackId ? (
+                    <>
+                        <button 
+                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                            onClick={() => {
+                                addClip(contextMenu.trackId!, contextMenu.beat!);
+                                setContextMenu(null);
+                            }}
+                        >
+                            Create Clip
+                        </button>
+                    </>
+                ) : null}
+            </div>
+        )}
+
         {/* Zoom Controls */}
         <div className="fixed bottom-6 right-6 flex items-center gap-2 bg-neutral-800/90 p-2 rounded-full shadow-lg z-50 text-white backdrop-blur-sm">
            <span className="text-xs font-bold px-2 text-neutral-300">ZOOM</span>

@@ -46,8 +46,13 @@ interface DAWState {
   clips: Clip[];
   selectedTrackId: string | null;
   selectedClipIds: string[];
+  selectedNoteIds: string[];
+  clipboardClips: Clip[];
+  clipboardNotes: Note[];
   isRecording: boolean;
   bottomPanel: BottomPanel;
+  panelHeight: number;
+  panelFullScreen: boolean;
   zoom: number; // Pixels per beat
   
   // Actions
@@ -58,6 +63,8 @@ interface DAWState {
   stop: () => void;
   toggleTheme: (mode?: ThemeMode) => void;
   setBottomPanel: (panel: BottomPanel) => void;
+  setPanelHeight: (height: number) => void;
+  setPanelFullScreen: (fs: boolean) => void;
   loadProject: (data: Partial<DAWState>) => void;
   getProjectData: () => Partial<DAWState>;
   addTrack: (type: TrackType) => void;
@@ -68,6 +75,8 @@ interface DAWState {
   deleteClip: (clipId: string) => void;
   selectTrack: (id: string | null) => void;
   selectClip: (id: string | null, multi?: boolean) => void;
+  selectNote: (id: string | null, multi?: boolean) => void;
+  setClipboard: (type: 'clips' | 'notes', items: any[]) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   updateClip: (id: string, updates: Partial<Clip>) => void;
   addNote: (clipId: string, note: Note) => void;
@@ -87,10 +96,15 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   timeSignature: [4, 4],
   zoom: 20,
   bottomPanel: null,
+  panelHeight: 300,
+  panelFullScreen: false,
   theme: 'dark',
   isPlaying: false,
   isRecording: false,
   selectedClipIds: ['clip-1'],
+  selectedNoteIds: [],
+  clipboardClips: [],
+  clipboardNotes: [],
   tracks: [
     {
       id: 'track-1',
@@ -184,6 +198,8 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   setTimeSignature: (ts: [number, number]) => set({ timeSignature: ts }),
   setZoom: (zoom: number) => set({ zoom }),
   setBottomPanel: (panel: BottomPanel) => set({ bottomPanel: panel }),
+  setPanelHeight: (height: number) => set({ panelHeight: height }),
+  setPanelFullScreen: (fs: boolean) => set({ panelFullScreen: fs }),
   toggleTheme: (mode?: ThemeMode) => set((state) => {
     let newTheme = mode;
     if (!newTheme) {
@@ -289,6 +305,20 @@ export const useDAWStore = create<DAWState>((set, get) => ({
       return { selectedClipIds: [...state.selectedClipIds, id] };
     }
     return { selectedClipIds: [id] };
+  }),
+  selectNote: (id, multi = false) => set((state) => {
+    if (!id) return { selectedNoteIds: [] };
+    if (multi) {
+      if (state.selectedNoteIds.includes(id)) {
+        return { selectedNoteIds: state.selectedNoteIds.filter(n => n !== id) };
+      }
+      return { selectedNoteIds: [...state.selectedNoteIds, id] };
+    }
+    return { selectedNoteIds: [id] };
+  }),
+  setClipboard: (type, items) => set((state) => {
+     if (type === 'clips') return { clipboardClips: items, clipboardNotes: [] };
+     return { clipboardNotes: items, clipboardClips: [] };
   }),
   updateTrack: (id, updates) => set((state) => ({
     tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t)

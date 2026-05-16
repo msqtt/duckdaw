@@ -79,18 +79,48 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
 }
 
 export function Mixer() {
-  const { tracks, setBottomPanel } = useDAWStore();
+  const { tracks, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore();
   
   return (
-    <div className="h-64 sm:h-80 bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-300 dark:border-neutral-800 flex flex-col relative select-none">
+    <div 
+        className={`${panelFullScreen ? 'absolute inset-x-0 bottom-0 top-[3.5rem] z-50' : 'relative'} bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-300 dark:border-neutral-800 flex flex-col select-none`}
+        style={!panelFullScreen ? { height: panelHeight } : undefined}
+    >
+      {!panelFullScreen && (
+          <div 
+              className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-emerald-500/50 z-20"
+              onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  const startY = e.clientY;
+                  const startHeight = panelHeight;
+                  const onMove = (m: PointerEvent) => {
+                      setPanelHeight(Math.max(150, Math.min(800, startHeight + (startY - m.clientY))));
+                  };
+                  const onUp = () => {
+                      window.removeEventListener('pointermove', onMove);
+                      window.removeEventListener('pointerup', onUp);
+                  };
+                  window.addEventListener('pointermove', onMove);
+                  window.addEventListener('pointerup', onUp);
+              }}
+          />
+      )}
       <div className="h-8 bg-neutral-200/80 dark:bg-neutral-800/80 border-b border-neutral-300 dark:border-neutral-800 flex items-center px-4 justify-between shrink-0">
         <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300">MIXER</span>
-        <button 
-          onClick={() => setBottomPanel(null)}
-          className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white mb-1 leading-none text-lg font-mono font-bold"
-        >
-          &times;
-        </button>
+        <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setPanelFullScreen(!panelFullScreen)}
+              className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+            >
+              {panelFullScreen ? '↙' : '↗'}
+            </button>
+            <button 
+              onClick={() => setBottomPanel(null)}
+              className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white mb-1 leading-none text-lg font-mono font-bold ml-2"
+            >
+              &times;
+            </button>
+        </div>
       </div>
       <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950">
          {tracks.map(track => (
