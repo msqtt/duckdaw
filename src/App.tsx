@@ -19,7 +19,11 @@ export default function App() {
   useEffect(() => {
     // Keyboard shortcuts
     const handleKeyDown = async (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      
+      const state = useDAWStore.getState();
+
       if (e.code === 'Space') {
         e.preventDefault();
         
@@ -28,7 +32,6 @@ export default function App() {
             setInit(true);
         }
         
-        const state = useDAWStore.getState();
         if (state.isPlaying) {
           engine.pause();
         } else {
@@ -38,6 +41,16 @@ export default function App() {
       } else if (e.code === 'Enter') {
          engine.stop();
          stop();
+      } else if (e.code === 'Backspace' || e.code === 'Delete') {
+         // Delete selected clips
+         if (state.selectedClipIds.length > 0) {
+             state.selectedClipIds.forEach(id => state.deleteClip(id));
+         }
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
+          e.preventDefault(); // Duplicate
+          if (state.selectedClipIds.length > 0) {
+              state.selectedClipIds.forEach(id => state.duplicateClip(id));
+          }
       }
     };
     window.addEventListener('keydown', handleKeyDown);

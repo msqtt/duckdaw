@@ -70,7 +70,20 @@ export function PianoRoll() {
         // Playhead within the clip conceptually
         if (currentBeat >= clip.start && currentBeat <= clip.start + clip.duration) {
            playhead.style.display = 'block';
-           playhead.style.left = `${(currentBeat - clip.start) * BEAT_WIDTH}px`;
+           const px = (currentBeat - clip.start) * BEAT_WIDTH;
+           playhead.style.left = `${px}px`;
+
+           // Auto scroll
+           if (scrollRef.current) {
+               const container = scrollRef.current;
+               const scrollLeft = container.scrollLeft;
+               const width = container.clientWidth;
+               if (px > scrollLeft + width - 20) {
+                   container.scrollLeft = px - width + 20;
+               } else if (px < scrollLeft) {
+                   container.scrollLeft = px;
+               }
+           }
         } else {
            playhead.style.display = 'none';
         }
@@ -95,7 +108,8 @@ export function PianoRoll() {
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const y = e.clientY - rect.top;
 
-    const beat = Math.floor(x / BEAT_WIDTH); // Assuming 1/4 note snapping
+    const SNAP = 0.25; // 16th notes
+    const beat = Math.floor(x / BEAT_WIDTH / SNAP) * SNAP; // Snapping to 16th notes
     const keyIndex = Math.floor(y / ROW_HEIGHT);
     
     if (keyIndex >= 0 && keyIndex < KEYS.length) {
@@ -110,7 +124,7 @@ export function PianoRoll() {
             id: Math.random().toString(36).substr(2, 9),
             note: noteName,
             start: beat,
-            duration: 1, // 1 beat duration by default
+            duration: 0.5, // 8th note duration by default
             velocity: 0.8
         };
         addNote(clip.id, newNote);
@@ -162,8 +176,9 @@ export function PianoRoll() {
             }}
         >
           <div 
-            className="relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMjBMNDAgMjBNNDAgMEw0MCAyMCIgc3Ryb2tlPSIjRTJFMkUyIiBmaWxsPSJub25lIi8+PC9zdmc+')] dark:bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMjBMNDAgMjBNNDAgMEw0MCAyMCIgc3Ryb2tlPSIjMkEyQTJBIiBmaWxsPSJub25lIi8+PC9zdmc+')]"
+            className="relative bg-repeat"
             style={{ 
+                backgroundImage: `url("data:image/svg+xml,%3Csvg width='${BEAT_WIDTH}' height='${ROW_HEIGHT}' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 ${ROW_HEIGHT}L${BEAT_WIDTH} ${ROW_HEIGHT}M${BEAT_WIDTH} 0L${BEAT_WIDTH} ${ROW_HEIGHT}' stroke='%232A2A2A' fill='none'/%3E%3Cpath d='M${BEAT_WIDTH/4} 0L${BEAT_WIDTH/4} ${ROW_HEIGHT}M${BEAT_WIDTH/2} 0L${BEAT_WIDTH/2} ${ROW_HEIGHT}M${BEAT_WIDTH*0.75} 0L${BEAT_WIDTH*0.75} ${ROW_HEIGHT}' stroke='%231E1E1E' stroke-dasharray='2,2' fill='none'/%3E%3C/svg%3E")`,
                 height: KEYS.length * ROW_HEIGHT,
                 width: Math.max(clip.duration * BEAT_WIDTH, 1200)
             }}

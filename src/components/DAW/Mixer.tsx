@@ -1,9 +1,29 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useDAWStore, Track } from '../../store/dawStore';
 import { Volume2, VolumeX } from 'lucide-react';
+import { engine } from '../../lib/audioEngine';
 
-const MixerChannel: React.FC<{ track: Track }> = ({ track }) => {
+function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   const { updateTrack } = useDAWStore();
+  const meterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+     let animationFrameId: number;
+     const updateMeter = () => {
+         const meter = engine.getMeter(track.id);
+         if (meter && meterRef.current) {
+             const level = meter.getValue(); // Returns value in dbfs (-Infinity to 0)
+             let db = Array.isArray(level) ? level[0] : level;
+             if (!isFinite(db)) db = -100;
+             // Map -60 to 0 to height 0% to 100%
+             const heightPos = Math.max(0, Math.min(100, (db + 60) * (100 / 60)));
+             meterRef.current.style.height = `${heightPos}%`;
+         }
+         animationFrameId = requestAnimationFrame(updateMeter);
+     };
+     updateMeter();
+     return () => cancelAnimationFrame(animationFrameId);
+  }, [track.id]);
 
   return (
     <div className="w-24 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
@@ -26,16 +46,21 @@ const MixerChannel: React.FC<{ track: Track }> = ({ track }) => {
         </button>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-4">
-        <div className="absolute inset-y-0 w-8 flex justify-center py-2">
-          <input 
-            type="range" 
-            min="0" max="1" step="0.01" 
-            value={track.volume}
-            onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
-            className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute -translate-x-1/2 left-1/2 top-0"
-            style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-          />
+      <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2">
+        <div className="flex-1 flex justify-center w-full relative">
+            {/* Meter */}
+            <div className="w-1.5 h-full bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
+               <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
+            </div>
+            {/* Slider */}
+            <input 
+              type="range" 
+              min="0" max="1" step="0.01" 
+              value={track.volume}
+              onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
+              className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-4 top-0"
+              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+            />
         </div>
       </div>
 

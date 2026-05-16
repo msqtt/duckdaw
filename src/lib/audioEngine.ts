@@ -4,20 +4,24 @@ import { Clip, Track } from '../store/dawStore';
 class AudioEngine {
   synths: Map<string, Tone.PolySynth | Tone.Sampler>;
   channels: Map<string, Tone.Channel>;
+  meters: Map<string, Tone.Meter>;
   partMap: Map<string, Tone.Part>;
   
   constructor() {
     this.synths = new Map();
     this.channels = new Map();
+    this.meters = new Map();
     this.partMap = new Map();
+  }
+
+  getMeter(trackId: string): Tone.Meter | undefined {
+      return this.meters.get(trackId);
   }
 
   async initialize() {
     await Tone.start();
     Tone.Transport.bpm.value = 120;
-    Tone.Transport.loop = true;
-    Tone.Transport.loopStart = 0;
-    Tone.Transport.loopEnd = "4m"; // 4 bars loop by default
+    Tone.Transport.loop = false;
   }
 
   setBpm(bpm: number) {
@@ -45,7 +49,11 @@ class AudioEngine {
     tracks.forEach(track => {
       if (!this.channels.has(track.id)) {
         const channel = new Tone.Channel().toDestination();
+        const meter = new Tone.Meter();
+        channel.connect(meter);
+        
         this.channels.set(track.id, channel);
+        this.meters.set(track.id, meter);
       }
       
       if (track.type === 'midi' && !this.synths.has(track.id)) {

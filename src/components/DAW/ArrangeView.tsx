@@ -5,7 +5,7 @@ import * as Tone from 'tone';
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
-const TrackHeader: React.FC<{ track: Track, index: number }> = ({ track, index }) => {
+function TrackHeader({ track, index }: { track: Track, index: number, key?: React.Key }) {
   const { updateTrack, selectTrack, selectedTrackId, deleteTrack, reorderTrack } = useDAWStore();
   const isSelected = selectedTrackId === track.id;
   const [isEditing, setIsEditing] = useState(false);
@@ -100,7 +100,7 @@ const TrackHeader: React.FC<{ track: Track, index: number }> = ({ track, index }
   );
 }
 
-const ClipItem: React.FC<{ clip: Clip, trackColor: string }> = ({ clip, trackColor }) => {
+function ClipItem({ clip, trackColor }: { clip: Clip, trackColor: string, key?: React.Key }) {
   const { selectClip, selectedClipIds, updateClip, duplicateClip, deleteClip, zoom } = useDAWStore();
   const isSelected = selectedClipIds.includes(clip.id);
   const PIXELS_PER_BEAT = zoom;
@@ -273,7 +273,8 @@ export function ArrangeView() {
 
       const rect = e.currentTarget.getBoundingClientRect();
       const dropX = e.clientX - rect.left;
-      const beat = Math.floor(dropX / PIXELS_PER_BEAT);
+      const SNAP = 0.25;
+      const beat = Math.floor(dropX / PIXELS_PER_BEAT / SNAP) * SNAP;
 
       if (action === 'copy' || e.altKey) {
           useDAWStore.getState().duplicateClip(clipId);
@@ -294,13 +295,26 @@ export function ArrangeView() {
       const playhead = document.getElementById('playhead');
       if (playhead && Tone.context.state === 'running') {
         const currentBeat = (Tone.Transport.ticks / Tone.Transport.PPQ); // Quarter notes
-        playhead.style.left = `${currentBeat * PIXELS_PER_BEAT}px`;
+        const px = currentBeat * PIXELS_PER_BEAT;
+        playhead.style.left = `${px}px`;
+        
+        // Auto-scroll logic
+        if (containerRef.current) {
+            const container = containerRef.current;
+            const scrollLeft = container.scrollLeft;
+            const width = container.clientWidth;
+            if (px > scrollLeft + width - 50) { // Auto-scroll right
+                container.scrollLeft = px - width + 50;
+            } else if (px < scrollLeft) {
+                container.scrollLeft = px;
+            }
+        }
       }
       animationFrameId = requestAnimationFrame(updatePlayhead);
     };
     updatePlayhead();
     return () => cancelAnimationFrame(animationFrameId);
-  }, []);
+  }, [PIXELS_PER_BEAT]);
 
   return (
     <div className="flex flex-1 overflow-hidden bg-neutral-50 dark:bg-neutral-900 relative">

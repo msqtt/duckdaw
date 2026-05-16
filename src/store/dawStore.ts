@@ -84,9 +84,13 @@ const getRandomColor = () => {
 
 export const useDAWStore = create<DAWState>((set, get) => ({
   bpm: 120,
+  timeSignature: [4, 4],
+  zoom: 20,
+  bottomPanel: null,
   theme: 'dark',
   isPlaying: false,
   isRecording: false,
+  selectedClipIds: ['clip-1'],
   tracks: [
     {
       id: 'track-1',
@@ -175,10 +179,6 @@ export const useDAWStore = create<DAWState>((set, get) => ({
     }
   ],
   selectedTrackId: 'track-1',
-  selectedClipIds: ['clip-1'],
-  timeSignature: [4, 4] as [number, number],
-  bottomPanel: null,
-  zoom: 20,
 
   setBpm: (bpm) => set({ bpm }),
   setTimeSignature: (ts: [number, number]) => set({ timeSignature: ts }),
