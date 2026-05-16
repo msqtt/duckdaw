@@ -1,11 +1,21 @@
-<div align="center">
+# 🦆 DuckDAW
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Quack! Welcome to **DuckDAW**! 🎵✨
 
-  <h1>Built with AI Studio</h2>
+A cute, minimalist, browser-based Digital Audio Workstation. Make some noise directly in your browser! 🎧
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## ✨ Features
+- 🎹 **Piano Roll** - Drag, drop, and edit notes! 
+- 🎼 **Multi-track** - Add synths, bass, and drums! 🥁
+- 🎨 **Dark/Light Mode** - For night owls and early ducks! 🌞🌙
+- 💾 **GitHub Sync** - Save and load your awesome beats right to/from Github! ☁️
+- 🎙️ **Microphone Support** - Ready to capture your beautiful quacks! 🎤
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## 🚀 Quick Start
+1. Open the app! 💻
+2. Press ▶️ Play!
+3. Add a track ➕
+4. Double-click the track lane to create a clip.
+5. Click the clip to open the Piano Roll and drop some notes! 🎹
 
-</div>
+*Happy Quacking! 🦆🎶*
