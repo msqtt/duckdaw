@@ -9,6 +9,7 @@ import { TopBar } from './components/DAW/TopBar';
 import { ArrangeView } from './components/DAW/ArrangeView';
 import { PianoRoll } from './components/DAW/PianoRoll';
 import { Mixer } from './components/DAW/Mixer';
+import { ExportModal } from './components/DAW/ExportModal';
 import { useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
 
@@ -138,6 +139,7 @@ export default function App() {
         {bottomPanel === 'piano-roll' && <PianoRoll />}
         {bottomPanel === 'mixer' && <Mixer />}
       </div>
+      <ExportModal />
     </div>
   );
 }

@@ -252,7 +252,7 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
 }
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds } = useDAWStore();
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip } = useDAWStore();
   const PIXELS_PER_BEAT = zoom; 
   const totalBeats = 1000; // Large timeline
 

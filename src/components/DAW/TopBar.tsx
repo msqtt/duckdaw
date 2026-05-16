@@ -6,7 +6,7 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 
 export function TopBar() {
-  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme } = useDAWStore();
+  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen } = useDAWStore();
   const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState('0:00:000');
   const [bpmInput, setBpmInput] = useState(bpm.toString());
@@ -52,19 +52,7 @@ export function TopBar() {
   };
 
   const handleExport = () => {
-     const format = window.prompt('Enter export format (wav, mp3, ogg):', 'wav');
-     if (format) {
-         alert(`Exporting project to ${format}... (Note: full audio render is simulated in this MVP)`);
-         setTimeout(() => {
-             const dataStr = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
-             const downloadAnchorNode = document.createElement('a');
-             downloadAnchorNode.setAttribute("href", dataStr);
-             downloadAnchorNode.setAttribute("download", `duckdaw_export.${format.toLowerCase()}`);
-             document.body.appendChild(downloadAnchorNode);
-             downloadAnchorNode.click();
-             downloadAnchorNode.remove();
-         }, 1000);
-     }
+     setExportModalOpen(true);
   };
 
   const handleMicRecord = async () => {

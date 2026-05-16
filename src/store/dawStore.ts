@@ -53,6 +53,7 @@ interface DAWState {
   bottomPanel: BottomPanel;
   panelHeight: number;
   panelFullScreen: boolean;
+  exportModalOpen: boolean;
   zoom: number; // Pixels per beat
   
   // Actions
@@ -65,6 +66,7 @@ interface DAWState {
   setBottomPanel: (panel: BottomPanel) => void;
   setPanelHeight: (height: number) => void;
   setPanelFullScreen: (fs: boolean) => void;
+  setExportModalOpen: (open: boolean) => void;
   loadProject: (data: Partial<DAWState>) => void;
   getProjectData: () => Partial<DAWState>;
   addTrack: (type: TrackType) => void;
@@ -98,6 +100,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   bottomPanel: null,
   panelHeight: 300,
   panelFullScreen: false,
+  exportModalOpen: false,
   theme: 'dark',
   isPlaying: false,
   isRecording: false,
@@ -200,6 +203,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   setBottomPanel: (panel: BottomPanel) => set({ bottomPanel: panel }),
   setPanelHeight: (height: number) => set({ panelHeight: height }),
   setPanelFullScreen: (fs: boolean) => set({ panelFullScreen: fs }),
+  setExportModalOpen: (open: boolean) => set({ exportModalOpen: open }),
   toggleTheme: (mode?: ThemeMode) => set((state) => {
     let newTheme = mode;
     if (!newTheme) {
@@ -229,6 +233,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
     isPlaying: false,
     selectedTrackId: null,
     selectedClipIds: [],
+    exportModalOpen: false,
   })),
   getProjectData: () => {
     const state = get();
