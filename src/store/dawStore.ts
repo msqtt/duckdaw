@@ -379,6 +379,10 @@ export const dawStore = createStore<DAWState>()(
           }
           return { selectedClipIds: [...state.selectedClipIds, id] };
         }
+        const clip = state.clips.find(c => c.id === id);
+        if (clip) {
+           return { selectedClipIds: [id], selectedTrackId: clip.trackId };
+        }
         return { selectedClipIds: [id] };
       }),
       selectNote: (id, multi = false) => set((state) => {

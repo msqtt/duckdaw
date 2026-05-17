@@ -135,6 +135,8 @@ function TrackHeader({ track, index, onDeletePrompt, dragTargetIndex, setDragTar
       </div>
       
       <div 
+        draggable
+        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onPointerDown={(e) => e.stopPropagation()}
         className="flex items-center gap-2 mt-auto"
       >
@@ -149,6 +151,61 @@ function TrackHeader({ track, index, onDeletePrompt, dragTargetIndex, setDragTar
       </div>
     </div>
   );
+}
+
+function AudioWaveform({ url }: { url?: string }) {
+   const [peaks, setPeaks] = useState<number[]>([]);
+   
+   useEffect(() => {
+       if (!url) {
+           const p = [];
+           for(let i=0; i<40; i++) p.push(20 + (Math.sin(i * 0.5) * 40 + 40));
+           setPeaks(p);
+           return;
+       }
+       
+       let isCancelled = false;
+       const ctx = new window.AudioContext();
+       fetch(url)
+         .then(res => res.arrayBuffer())
+         .then(buf => ctx.decodeAudioData(buf))
+         .then(audioBuf => {
+             if (isCancelled) return;
+             const channelData = audioBuf.getChannelData(0);
+             const step = Math.ceil(channelData.length / 80); // higher res
+             const p = [];
+             for(let i=0; i<80; i++) {
+                 let min = 1.0;
+                 let max = -1.0;
+                 for (let j=0; j<step; j++) {
+                     const val = channelData[i*step + j];
+                     if (val < min) min = val;
+                     if (val > max) max = val;
+                 }
+                 p.push(Math.max(10, Math.abs(max - min) * 100));
+             }
+             setPeaks(p);
+             ctx.close();
+         })
+         .catch((err) => {
+             if(!isCancelled) {
+                 const p = [];
+                 for(let i=0; i<80; i++) p.push(20 + (Math.sin(i * 0.5) * 40 + 40));
+                 setPeaks(p);
+             }
+             ctx.close();
+         });
+         
+       return () => { isCancelled = true; };
+   }, [url]);
+
+   return (
+       <div className="w-full h-full object-cover px-1 flex items-center justify-between gap-[1px]">
+          {peaks.map((p, i) => (
+             <div key={i} className="flex-1 bg-black dark:bg-white rounded-full transition-all" style={{ height: `${p}%` }} />
+          ))}
+       </div>
+   );
 }
 
 function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void }) {
@@ -270,12 +327,7 @@ function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: C
         
         {clip.type === 'audio' && (
             <div className="absolute inset-x-0 bottom-2 top-6 flex items-center justify-center opacity-30 pointer-events-none">
-                 {/* Basic representation of a waveform for audio files */}
-                 <div className="w-full h-full object-cover px-2 flex items-center gap-[1px]">
-                    {Array.from({ length: 40 }).map((_, i) => (
-                        <div key={i} className="flex-1 bg-black dark:bg-white rounded-full mx-px" style={{ height: `${20 + Math.random() * 80}%` }} />
-                    ))}
-                 </div>
+                 <AudioWaveform url={clip.bufferUrl} />
             </div>
         )}
         
@@ -891,16 +943,18 @@ export function ArrangeView() {
                     </>
                 ) : contextMenu.trackId ? (
                     <>
-                        <button 
-                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
-                            onPointerDown={(e) => {
-                                e.stopPropagation();
-                                addClip(contextMenu.trackId!, contextMenu.beat!);
-                                setContextMenu(null);
-                            }}
-                        >
-                            Create Clip
-                        </button>
+                        {tracks.find(t => t.id === contextMenu.trackId)?.type !== 'audio' && (
+                            <button 
+                                className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                                onPointerDown={(e) => {
+                                    e.stopPropagation();
+                                    addClip(contextMenu.trackId!, contextMenu.beat!);
+                                    setContextMenu(null);
+                                }}
+                            >
+                                Create Clip
+                            </button>
+                        )}
                         {tracks.find(t => t.id === contextMenu.trackId)?.type === 'audio' && (
                             <label className="block w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white cursor-pointer">
                                 Upload Audio
