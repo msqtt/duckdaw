@@ -8,8 +8,31 @@ import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
 
+import { useShallow } from 'zustand/react/shallow';
+
 export function TopBar() {
-  const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
+  const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore(useShallow(state => ({
+      isPlaying: state.isPlaying,
+      isRecording: state.isRecording,
+      isMicRecording: state.isMicRecording,
+      toggleMicRecording: state.toggleMicRecording,
+      togglePlay: state.togglePlay,
+      stop: state.stop,
+      toggleRecording: state.toggleRecording,
+      bpm: state.bpm,
+      setBpm: state.setBpm,
+      timeSignature: state.timeSignature,
+      setTimeSignature: state.setTimeSignature,
+      bottomPanel: state.bottomPanel,
+      setBottomPanel: state.setBottomPanel,
+      theme: state.theme,
+      toggleTheme: state.toggleTheme,
+      setExportModalOpen: state.setExportModalOpen,
+      isLooping: state.isLooping,
+      toggleLoop: state.toggleLoop,
+      metronomeOn: state.metronomeOn,
+      toggleMetronome: state.toggleMetronome
+  })));
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
   const [showSettings, setShowSettings] = useState(false);

@@ -5,8 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DuckDAW</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦆</text></svg>">
+    <style>
+      #initial-loader {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: #0a0a0a; color: #fff; z-index: 99999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .loader-bar-container {
+        width: 200px; height: 4px; background: #262626; border-radius: 4px; overflow: hidden;
+        margin-top: 16px;
+      }
+      .loader-bar {
+        height: 100%; width: 0%; background: #10b981;
+        animation: progress 2.5s ease-out forwards;
+      }
+      @keyframes progress {
+        0% { width: 0%; }
+        50% { width: 60%; }
+        90% { width: 95%; }
+        100% { width: 100%; }
+      }
+      .loader-text {
+        margin-top: 12px; font-size: 14px; color: #a3a3a3; letter-spacing: 1px; text-transform: uppercase;
+      }
+    </style>
   </head>
   <body>
+    <div id="initial-loader">
+      <div style="font-size: 48px;">🦆</div>
+      <div style="font-size: 24px; font-weight: bold; margin-top: 8px; letter-spacing: 2px;">Duck<span style="color: #10b981;">DAW</span></div>
+      <div class="loader-bar-container"><div class="loader-bar"></div></div>
+      <div class="loader-text">Loading Audio Engine...</div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

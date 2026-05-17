@@ -3,8 +3,10 @@ import { useDAWStore, Track } from '../../store/dawStore';
 import { Volume2, VolumeX } from 'lucide-react';
 import { engine } from '../../lib/audioEngine';
 
+import { useShallow } from 'zustand/react/shallow';
+
 function MixerChannel({ track }: { track: Track, key?: React.Key }) {
-  const { updateTrack } = useDAWStore();
+  const updateTrack = useDAWStore(state => state.updateTrack);
   const meterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -154,7 +156,15 @@ function MasterChannel() {
 }
 
 export function Mixer() {
-  const { tracks, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore();
+  const { tracks, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore(useShallow(state => ({
+      tracks: state.tracks,
+      bottomPanel: state.bottomPanel,
+      setBottomPanel: state.setBottomPanel,
+      panelHeight: state.panelHeight,
+      panelFullScreen: state.panelFullScreen,
+      setPanelHeight: state.setPanelHeight,
+      setPanelFullScreen: state.setPanelFullScreen
+  })));
   
   return (
     <div 

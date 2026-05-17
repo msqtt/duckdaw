@@ -19,8 +19,31 @@ function generateKeys() {
 
 const KEYS = generateKeys();
 
+import { useShallow } from 'zustand/react/shallow';
+
 export function PianoRoll() {
-  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote, lastNoteDuration, setLastNoteDuration, quantizeSelectedNotes, snapGridSize, snapToGrid } = useDAWStore();
+  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote, lastNoteDuration, setLastNoteDuration, quantizeSelectedNotes, snapGridSize, snapToGrid } = useDAWStore(useShallow(state => ({
+      clips: state.clips,
+      tracks: state.tracks,
+      selectedClipIds: state.selectedClipIds,
+      updateClip: state.updateClip,
+      addNote: state.addNote,
+      deleteNote: state.deleteNote,
+      updateNote: state.updateNote,
+      bottomPanel: state.bottomPanel,
+      setBottomPanel: state.setBottomPanel,
+      panelHeight: state.panelHeight,
+      panelFullScreen: state.panelFullScreen,
+      setPanelHeight: state.setPanelHeight,
+      setPanelFullScreen: state.setPanelFullScreen,
+      selectedNoteIds: state.selectedNoteIds,
+      selectNote: state.selectNote,
+      lastNoteDuration: state.lastNoteDuration,
+      setLastNoteDuration: state.setLastNoteDuration,
+      quantizeSelectedNotes: state.quantizeSelectedNotes,
+      snapGridSize: state.snapGridSize,
+      snapToGrid: state.snapToGrid
+  })));
   const [clip, setClip] = useState<Clip | null>(null);
   const [clipTrackColor, setClipTrackColor] = useState<string>('#E2E8F0');
   const scrollRef = useRef<HTMLDivElement>(null);
