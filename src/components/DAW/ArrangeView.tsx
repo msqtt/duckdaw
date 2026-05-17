@@ -605,12 +605,17 @@ export function ArrangeView() {
   useEffect(() => {
     let animationFrameId: number;
     const updatePlayhead = () => {
-      const playhead = document.getElementById('playhead');
-      if (playhead && Tone.context.state === 'running') {
-        const currentBeat = (Tone.Transport.ticks / Tone.Transport.PPQ); // Quarter notes
-        const px = currentBeat * PIXELS_PER_BEAT;
-        playhead.style.left = `${px}px`;
-        
+      const line = document.getElementById('playhead-line');
+      const handle = document.getElementById('playhead-handle');
+      
+      const px = (Tone.context.state === 'running') 
+        ? (Tone.Transport.ticks / Tone.Transport.PPQ) * PIXELS_PER_BEAT
+        : (Tone.Transport.position ? parseFloat(Tone.Transport.position.toString().split(':')[1] || "0") * PIXELS_PER_BEAT : 0);
+
+      if (line) line.style.left = `${px}px`;
+      if (handle) handle.style.left = `${px}px`;
+
+      if (Tone.context.state === 'running') {
         // Auto-scroll logic
         if (containerRef.current) {
             const container = containerRef.current;
@@ -834,37 +839,37 @@ export function ArrangeView() {
               {i + 1}
             </div>
           ))}
-        </div>
-
-        {/* Playhead indicator */}
-        <div id="playhead" className="absolute top-0 bottom-0 w-px bg-emerald-500 z-30 pointer-events-none" style={{ left: '0px' }}>
-            <div 
-                className="w-4 h-4 border-2 border-emerald-500 rounded-full absolute -top-2 -translate-x-[calc(50%-0.5px)] bg-neutral-100 dark:bg-neutral-900 pointer-events-auto cursor-ew-resize hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors" 
-                onPointerDown={(e) => {
-                    e.stopPropagation();
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    const container = containerRef.current;
-                    if (!container) return;
-                    
-                    const onMove = (moveEvent: PointerEvent) => {
-                       const rect = container.getBoundingClientRect();
-                       const x = moveEvent.clientX - rect.left + container.scrollLeft;
-                       const beat = Math.max(0, x / PIXELS_PER_BEAT);
-                       const snapped = Math.round(beat / SNAP) * SNAP;
-                       Tone.Transport.position = `0:${snapped}:0`;
-                    };
-                    const onUp = (upEvent: PointerEvent) => {
-                       window.removeEventListener('pointermove', onMove);
-                       window.removeEventListener('pointerup', onUp);
-                    };
-                    window.addEventListener('pointermove', onMove);
-                    window.addEventListener('pointerup', onUp);
-                }}
-            />
+          {/* Playhead handle */}
+          <div id="playhead-handle" className="absolute top-0 bottom-0 pointer-events-none z-30" style={{ left: '0px' }}>
+              <div 
+                  className="w-4 h-4 border-2 border-emerald-500 rounded-full absolute top-[calc(50%-8px)] -translate-x-[calc(50%-0.5px)] bg-neutral-100 dark:bg-neutral-900 pointer-events-auto cursor-ew-resize hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors" 
+                  onPointerDown={(e) => {
+                      e.stopPropagation();
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      const container = containerRef.current;
+                      if (!container) return;
+                      
+                      const onMove = (moveEvent: PointerEvent) => {
+                         const rect = container.getBoundingClientRect();
+                         const x = moveEvent.clientX - rect.left + container.scrollLeft;
+                         const beat = Math.max(0, x / PIXELS_PER_BEAT);
+                         const snapped = Math.round(beat / SNAP) * SNAP;
+                         Tone.Transport.position = `0:${snapped}:0`;
+                      };
+                      const onUp = (upEvent: PointerEvent) => {
+                         window.removeEventListener('pointermove', onMove);
+                         window.removeEventListener('pointerup', onUp);
+                      };
+                      window.addEventListener('pointermove', onMove);
+                      window.addEventListener('pointerup', onUp);
+                  }}
+              />
+          </div>
         </div>
 
         {/* Track Lanes */}
-        <div className="flex flex-col min-h-max pb-32 relative">
+        <div className="flex flex-col flex-1 min-h-max pb-32 relative">
+          <div id="playhead-line" className="absolute top-0 bottom-0 w-px bg-emerald-500 z-30 pointer-events-none" style={{ left: '0px' }} />
           {dragTrackDropIndex !== null && (
              <div 
                  className="absolute left-0 right-0 h-[2px] bg-emerald-500 z-50 pointer-events-none"
