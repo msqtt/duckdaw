@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useDAWStore } from '../../store/dawStore';
 import { Github, FileDown, FileUp, Moon, Sun, X } from 'lucide-react';
+import { Dropdown } from '../ui/Dropdown';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { 
@@ -175,27 +176,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div className="space-y-2">
               <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
                 <span>Sound</span>
-                <select 
-                  className="bg-transparent text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm"
+                <Dropdown 
+                  options={[
+                    { value: 'click', label: 'Click' },
+                    { value: 'woodblock', label: 'Woodblock' },
+                    { value: 'electronic', label: 'Electronic' }
+                  ]}
                   value={metronomeSound}
-                  onChange={(e) => setMetronomeSound(e.target.value as any)}
-                >
-                  <option className="text-black" value="click">Click</option>
-                  <option className="text-black" value="woodblock">Woodblock</option>
-                  <option className="text-black" value="electronic">Electronic</option>
-                </select>
+                  onChange={(val) => setMetronomeSound(val as any)}
+                  triggerClassName="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm hover:border-emerald-500 transition-colors"
+                  align="right"
+                />
               </div>
               <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
                 <span>Subdivisions</span>
-                <select 
-                  className="bg-transparent text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm"
+                <Dropdown 
+                  options={[
+                    { value: 1, label: 'Quarter Notes (1x)' },
+                    { value: 2, label: 'Eighth Notes (2x)' },
+                    { value: 4, label: 'Sixteenth Notes (4x)' }
+                  ]}
                   value={metronomeSubdivisions}
-                  onChange={(e) => setMetronomeSubdivisions(parseInt(e.target.value))}
-                >
-                  <option className="text-black" value={1}>Quarter Notes (1x)</option>
-                  <option className="text-black" value={2}>Eighth Notes (2x)</option>
-                  <option className="text-black" value={4}>Sixteenth Notes (4x)</option>
-                </select>
+                  onChange={(val) => setMetronomeSubdivisions(parseInt(val as string))}
+                  triggerClassName="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm hover:border-emerald-500 transition-colors"
+                  align="right"
+                />
               </div>
               <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
                 <span>Volume</span>

@@ -1,7 +1,8 @@
 import { useDAWStore, Track, Clip } from '../../store/dawStore';
-import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic } from 'lucide-react';
 import React, { useRef, useState, useEffect } from 'react';
 import * as Tone from 'tone';
+import { Dropdown } from '../ui/Dropdown';
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
@@ -521,31 +522,37 @@ export function ArrangeView() {
         <div className="h-8 border-b border-neutral-300 dark:border-neutral-800 bg-neutral-200 dark:bg-neutral-800/50 flex items-center px-4 justify-between">
             <span className="text-xs font-bold text-neutral-600 dark:text-neutral-400">TRACKS</span>
             <div className="flex gap-1">
-                <button 
-                  className="bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 p-1 rounded transition-colors"
-                  onClick={() => addTrack('midi')}
-                  title="Add MIDI Track"
-                >
-                    <Plus size={14} />
-                    <span className="sr-only">MIDI</span>
-                </button>
-                <button 
-                  className="bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 p-1 rounded transition-colors"
-                  onClick={() => addTrack('audio')}
-                  title="Add Audio Track"
-                >
-                    <div className="font-bold text-[10px] px-0.5 leading-none h-[14px] flex items-center">WAV</div>
-                </button>
+                <Dropdown
+                   options={[
+                     { value: 'midi', label: 'MIDI Track', icon: <Music size={14} /> },
+                     { value: 'audio', label: 'Audio Track', icon: <Mic size={14} /> }
+                   ]}
+                   onChange={(type) => addTrack(type)}
+                   align="right"
+                   trigger={
+                     <div className="bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 p-1 rounded transition-colors flex items-center justify-center">
+                         <Plus size={14} />
+                     </div>
+                   }
+                />
             </div>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} />)}
-          <button 
-            className="w-full h-12 flex items-center justify-center text-neutral-500 dark:text-neutral-600 hover:text-neutral-700 dark:hover:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 border-b border-dashed border-neutral-300 dark:border-neutral-800 transition-colors"
-            onClick={() => addTrack('midi')}
-          >
-            <Plus size={20} className="mr-2" /> Add Track
-          </button>
+          
+          <Dropdown
+               options={[
+                 { value: 'midi', label: 'MIDI Track', icon: <Music size={14} /> },
+                 { value: 'audio', label: 'Audio Track', icon: <Mic size={14} /> }
+               ]}
+               onChange={(type) => addTrack(type)}
+               className="w-full"
+               trigger={
+                 <div className="w-full h-12 flex items-center justify-center text-neutral-500 dark:text-neutral-600 hover:text-neutral-700 dark:hover:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 border-b border-dashed border-neutral-300 dark:border-neutral-800 transition-colors cursor-pointer">
+                    <Plus size={20} className="mr-2" /> Add Track
+                 </div>
+               }
+          />
         </div>
       </div>
 

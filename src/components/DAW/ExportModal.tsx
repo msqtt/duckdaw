@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useDAWStore } from '../../store/dawStore';
 import { Download, X, Film, CheckCircle2, Loader2, Music } from 'lucide-react';
 import * as Tone from 'tone';
+import { Dropdown } from '../ui/Dropdown';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
@@ -252,45 +253,54 @@ export function ExportModal() {
                 <div className="flex flex-col gap-4">
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-neutral-500 uppercase">Format</label>
-                        <select 
-                            className="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 text-sm text-neutral-800 dark:text-neutral-200 outline-none focus:border-emerald-500"
+                        <Dropdown 
+                            options={[
+                              { value: 'wav', label: 'WAV (Lossless)' },
+                              { value: 'mp3', label: 'MP3 (Compressed)' },
+                              { value: 'ogg', label: 'OGG Vorbis' }
+                            ]}
                             value={format}
-                            onChange={e => setFormat(e.target.value)}
+                            onChange={v => setFormat(v as string)}
                             disabled={status !== 'idle'}
-                        >
-                            <option value="wav">WAV (Lossless)</option>
-                            <option value="mp3">MP3 (Compressed)</option>
-                            <option value="ogg">OGG Vorbis</option>
-                        </select>
+                            className="w-full"
+                            align="left"
+                            triggerClassName="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 flex items-center justify-between text-sm text-neutral-800 dark:text-neutral-200 outline-none hover:border-emerald-500 transition-colors cursor-pointer"
+                        />
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-neutral-500 uppercase">Sample Rate</label>
-                        <select 
-                            className="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 text-sm text-neutral-800 dark:text-neutral-200 outline-none focus:border-emerald-500"
+                        <Dropdown 
+                            options={[
+                              { value: '44100', label: '44100 Hz (CD Quality)' },
+                              { value: '48000', label: '48000 Hz (Video Standard)' },
+                              { value: '96000', label: '96000 Hz (High Res)' }
+                            ]}
                             value={sampleRate}
-                            onChange={e => setSampleRate(e.target.value)}
+                            onChange={v => setSampleRate(v as string)}
                             disabled={status !== 'idle'}
-                        >
-                            <option value="44100">44100 Hz (CD Quality)</option>
-                            <option value="48000">48000 Hz (Video Standard)</option>
-                            <option value="96000">96000 Hz (High Res)</option>
-                        </select>
+                            className="w-full"
+                            align="left"
+                            triggerClassName="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 flex items-center justify-between text-sm text-neutral-800 dark:text-neutral-200 outline-none hover:border-emerald-500 transition-colors cursor-pointer"
+                        />
                     </div>
                 </div>
 
                 <div className="flex flex-col gap-4">
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-neutral-500 uppercase">Export Region</label>
-                        <select 
-                            className="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 text-sm text-neutral-800 dark:text-neutral-200 outline-none focus:border-emerald-500"
+                        <Dropdown 
+                            options={[
+                              { value: 'full', label: 'Full Project' },
+                              { value: 'selection', label: 'Loop Selection (Marquee)' }
+                            ]}
                             value={region}
-                            onChange={e => setRegion(e.target.value)}
+                            onChange={v => setRegion(v as string)}
                             disabled={status !== 'idle'}
-                        >
-                            <option value="full">Full Project</option>
-                            <option value="selection">Loop Selection (Marquee)</option>
-                        </select>
+                            className="w-full"
+                            align="left"
+                            triggerClassName="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md h-10 px-3 flex items-center justify-between text-sm text-neutral-800 dark:text-neutral-200 outline-none hover:border-emerald-500 transition-colors cursor-pointer"
+                        />
                     </div>
                     
                     <div className="h-full bg-neutral-100 dark:bg-neutral-800/50 rounded-md border border-neutral-200 dark:border-neutral-700 p-4 flex flex-col justify-center">

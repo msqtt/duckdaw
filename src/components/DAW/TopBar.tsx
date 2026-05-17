@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import * as Tone from 'tone';
-import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell } from 'lucide-react';
+import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown } from 'lucide-react';
 import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
+import { Dropdown } from '../ui/Dropdown';
 
 export function TopBar() {
   const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
@@ -60,6 +61,30 @@ export function TopBar() {
   const handleMicRecord = async () => {
     toggleMicRecording();
   };
+
+  const timeSignatureOptions = [
+    { value: '2/4', label: '2/4' },
+    { value: '3/4', label: '3/4' },
+    { value: '4/4', label: '4/4' },
+    { value: '5/4', label: '5/4' },
+    { value: '6/8', label: '6/8' },
+    { value: '7/8', label: '7/8' },
+    { value: '9/8', label: '9/8' },
+    { value: '12/8', label: '12/8' }
+  ];
+
+  const gridSnapOptions = [
+    { value: 4, label: 'Bar' },
+    { value: 2, label: '1/2' },
+    { value: 1, label: '1/4' },
+    { value: 2/3, label: '1/4T' },
+    { value: 0.5, label: '1/8' },
+    { value: 1/3, label: '1/8T' },
+    { value: 0.25, label: '1/16' },
+    { value: 1/6, label: '1/16T' },
+    { value: 0.125, label: '1/32' },
+    { value: 1/12, label: '1/32T' }
+  ];
 
   return (
     <div className="h-14 bg-neutral-100 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-800 flex items-center justify-between px-4 text-neutral-700 dark:text-neutral-300 select-none">
@@ -172,24 +197,16 @@ export function TopBar() {
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-2">
              <span className="text-xs uppercase text-neutral-500 font-bold">Time</span>
-             <select 
-               className="bg-transparent font-mono text-neutral-900 dark:text-white text-sm cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none appearance-none"
+             <Dropdown
+               options={timeSignatureOptions}
                value={`${timeSignature[0]}/${timeSignature[1]}`}
-               onChange={(e) => {
-                   const [num, den] = e.target.value.split('/').map(Number);
+               onChange={(val) => {
+                   const [num, den] = (val as string).split('/').map(Number);
                    setTimeSignature([num, den]);
                    Tone.Transport.timeSignature = [num, den];
                }}
-             >
-               <option value="2/4">2/4</option>
-               <option value="3/4">3/4</option>
-               <option value="4/4">4/4</option>
-               <option value="5/4">5/4</option>
-               <option value="6/8">6/8</option>
-               <option value="7/8">7/8</option>
-               <option value="9/8">9/8</option>
-               <option value="12/8">12/8</option>
-             </select>
+               triggerClassName="bg-transparent font-mono text-neutral-900 dark:text-white text-sm cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none flex items-center gap-1"
+             />
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-1.5">
@@ -199,23 +216,13 @@ export function TopBar() {
              >
                  Grid
              </button>
-             <select 
-               className="bg-transparent font-mono text-neutral-900 dark:text-white text-xs cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none appearance-none disabled:opacity-50"
+             <Dropdown
+               options={gridSnapOptions}
                value={useDAWStore.getState().snapGridSize}
                disabled={!useDAWStore.getState().snapToGrid}
-               onChange={(e) => useDAWStore.getState().setSnapGridSize(parseFloat(e.target.value))}
-             >
-                <option className="text-black" value={4}>Bar</option>
-                <option className="text-black" value={2}>1/2</option>
-                <option className="text-black" value={1}>1/4</option>
-                <option className="text-black" value={2/3}>1/4T</option>
-                <option className="text-black" value={0.5}>1/8</option>
-                <option className="text-black" value={1/3}>1/8T</option>
-                <option className="text-black" value={0.25}>1/16</option>
-                <option className="text-black" value={1/6}>1/16T</option>
-                <option className="text-black" value={0.125}>1/32</option>
-                <option className="text-black" value={1/12}>1/32T</option>
-             </select>
+               onChange={(val) => useDAWStore.getState().setSnapGridSize(parseFloat(val))}
+               triggerClassName="bg-transparent font-mono text-neutral-900 dark:text-white text-xs cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none flex items-center gap-1"
+             />
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="font-mono w-20 text-center text-sm font-semibold tracking-wider tabular-nums">
