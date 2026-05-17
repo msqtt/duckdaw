@@ -5,6 +5,8 @@ import * as Tone from 'tone';
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
+let currentDragContext: { id: string, duration: number, offsetX: number } | null = null;
+
 function TrackHeader({ track, index }: { track: Track, index: number, key?: React.Key }) {
   const { updateTrack, selectTrack, selectedTrackId, deleteTrack, reorderTrack } = useDAWStore();
   const isSelected = selectedTrackId === track.id;
@@ -101,9 +103,10 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
 }
 
 function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key }) {
-  const { selectClip, selectedClipIds, updateClip, duplicateClip, deleteClip, zoom } = useDAWStore();
+  const { selectClip, selectedClipIds, updateClip, duplicateClip, deleteClip, zoom, snapToGrid, snapGridSize } = useDAWStore();
   const isSelected = selectedClipIds.includes(clip.id);
   const PIXELS_PER_BEAT = zoom;
+  const SNAP = snapToGrid ? snapGridSize : 0.015625; // fallback size for no grid
   const [isEditing, setIsEditing] = useState(false);
   const [nameInput, setNameInput] = useState(clip.name || 'Clip');
 
@@ -111,20 +114,32 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
   const handleDragStart = (e: React.DragEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const offsetX = e.clientX - rect.left;
+    currentDragContext = { id: clip.id, duration: clip.duration, offsetX };
     e.dataTransfer.setData('text/plain', clip.id);
     e.dataTransfer.setData('offsetX', offsetX.toString());
+    e.dataTransfer.setData('clipDuration', clip.duration.toString());
     e.dataTransfer.effectAllowed = 'copyMove';
     if (e.altKey) {
         e.dataTransfer.setData('action', 'copy');
     } else {
         e.dataTransfer.setData('action', 'move');
     }
+    
+    // Create a transparent drag image so we can draw our own
+    const img = new Image();
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; // 1x1 transparent
+    e.dataTransfer.setDragImage(img, 0, 0);
+  };
+  
+  const handleDragEnd = () => {
+    currentDragContext = null;
   };
 
   return (
     <div
       draggable
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onContextMenu={onContextMenu}
       onDoubleClick={(e) => {
           e.stopPropagation();
@@ -224,7 +239,6 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
                 const onMove = (moveEvent: PointerEvent) => {
                     const diffPx = moveEvent.clientX - startX;
                     const diffBeats = diffPx / PIXELS_PER_BEAT;
-                    const SNAP = 0.25;
                     const snappedDiff = Math.round(diffBeats / SNAP) * SNAP;
                     
                     if (startDur - snappedDiff > 0) {
@@ -252,7 +266,6 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
                 const onMove = (moveEvent: PointerEvent) => {
                     const diffPx = moveEvent.clientX - startX;
                     const diffBeats = diffPx / PIXELS_PER_BEAT;
-                    const SNAP = 0.25;
                     const newDur = Math.max(SNAP, Math.round((startDur + diffBeats) / SNAP) * SNAP);
                     updateClip(clip.id, { duration: newDur });
                 };
@@ -271,13 +284,23 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
 }
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip } = useDAWStore();
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, snapGridSize, snapToGrid } = useDAWStore();
   const PIXELS_PER_BEAT = zoom; 
+  const SNAP = snapToGrid ? snapGridSize : 0.015625; 
   const totalBeats = 1000; // Large timeline
 
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
-  const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number } | null>(null);
+  const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number, widthBeats?: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleDragEndGlobal = () => {
+      setDragSnap(null);
+      currentDragContext = null;
+    };
+    window.addEventListener('dragend', handleDragEndGlobal);
+    return () => window.removeEventListener('dragend', handleDragEndGlobal);
+  }, []);
 
   const handleTrackLaneDoubleClick = (trackId: string, e: React.MouseEvent<HTMLDivElement>) => {
       // Don't trigger if we clicked a clip
@@ -355,6 +378,22 @@ export function ArrangeView() {
   const handleDragOverTrack = (trackId: string, e: React.DragEvent) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+      
+      const rect = e.currentTarget.getBoundingClientRect();
+      const dropX = e.clientX - rect.left;
+      let startX = dropX;
+      let widthBeats = 4; // default for external files
+      
+      if (currentDragContext) {
+          startX = Math.max(0, dropX - currentDragContext.offsetX);
+          widthBeats = currentDragContext.duration;
+      }
+      
+      const snappedBeat = Math.round((startX / PIXELS_PER_BEAT) / SNAP) * SNAP;
+      
+      if (dragSnap?.trackId !== trackId || dragSnap?.beat !== snappedBeat || dragSnap?.widthBeats !== widthBeats) {
+          setDragSnap({ trackId, beat: snappedBeat, widthBeats });
+      }
   };
 
   const handleDragLeaveTrack = (e: React.DragEvent) => {
@@ -559,8 +598,11 @@ export function ArrangeView() {
             >
                 {dragSnap?.trackId === t.id && (
                     <div 
-                        className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-10 pointer-events-none"
-                        style={{ left: `${dragSnap.beat * PIXELS_PER_BEAT}px` }}
+                        className="absolute h-20 top-2 rounded-md border-2 border-emerald-500 bg-emerald-500/20 z-40 pointer-events-none transition-all duration-75"
+                        style={{ 
+                            left: `${dragSnap.beat * PIXELS_PER_BEAT}px`,
+                            width: `${(dragSnap.widthBeats || 4) * PIXELS_PER_BEAT}px`
+                        }}
                     />
                 )}
                 {clips.filter(c => c.trackId === t.id).map(c => (

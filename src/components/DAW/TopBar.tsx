@@ -204,6 +204,27 @@ export function TopBar() {
              </select>
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
+          <div className="flex items-center gap-1.5">
+             <button 
+                onClick={() => useDAWStore.getState().setSnapToGrid(!useDAWStore.getState().snapToGrid)}
+                className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded cursor-pointer transition-colors ${useDAWStore.getState().snapToGrid ? 'text-emerald-500 bg-emerald-500/10' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
+             >
+                 Grid
+             </button>
+             <select 
+               className="bg-transparent font-mono text-neutral-900 dark:text-white text-xs cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none appearance-none disabled:opacity-50"
+               value={useDAWStore.getState().snapGridSize}
+               disabled={!useDAWStore.getState().snapToGrid}
+               onChange={(e) => useDAWStore.getState().setSnapGridSize(parseFloat(e.target.value))}
+             >
+               <option className="text-black" value={4}>Bar</option>
+               <option className="text-black" value={1}>1/4</option>
+               <option className="text-black" value={0.5}>1/8</option>
+               <option className="text-black" value={0.25}>1/16</option>
+               <option className="text-black" value={0.125}>1/32</option>
+             </select>
+          </div>
+          <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="font-mono w-20 text-center text-sm font-semibold tracking-wider tabular-nums">
              {currentTime}
           </div>

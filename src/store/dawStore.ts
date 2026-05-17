@@ -56,6 +56,8 @@ interface DAWState {
   theme: ThemeMode;
   isPlaying: boolean;
   isLooping: boolean;
+  snapGridSize: number;
+  snapToGrid: boolean;
   loopStart: number;
   loopEnd: number;
   metronomeOn: boolean;
@@ -78,6 +80,8 @@ interface DAWState {
   setBpm: (bpm: number) => void;
   setTimeSignature: (ts: [number, number]) => void;
   setZoom: (zoom: number) => void;
+  setSnapGridSize: (size: number) => void;
+  setSnapToGrid: (snap: boolean) => void;
   togglePlay: () => void;
   stop: () => void;
   toggleLoop: () => void;
@@ -129,6 +133,8 @@ export const dawStore = createStore<DAWState>()(
       theme: 'dark',
       isPlaying: false,
       isLooping: false,
+      snapGridSize: 0.25,
+      snapToGrid: true,
       loopStart: 0,
       loopEnd: 16,
       metronomeOn: false,
@@ -236,6 +242,8 @@ export const dawStore = createStore<DAWState>()(
       setBpm: (bpm) => set({ bpm }),
       setTimeSignature: (ts) => set({ timeSignature: ts }),
       setZoom: (zoom) => set({ zoom }),
+      setSnapGridSize: (size) => set({ snapGridSize: size }),
+      setSnapToGrid: (snap) => set({ snapToGrid: snap }),
       setBottomPanel: (panel) => set({ bottomPanel: panel }),
       setPanelHeight: (height) => set({ panelHeight: height }),
       setPanelFullScreen: (fs) => set({ panelFullScreen: fs }),

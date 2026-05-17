@@ -143,7 +143,7 @@ export function PianoRoll() {
     if (right - left < 5 && bottom - top < 5) {
         setMarquee(null);
         if (!scrollRef.current) return;
-        const SNAP = 0.25;
+        const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
         const beat = Math.floor(left / BEAT_WIDTH / SNAP) * SNAP;
         const keyIndex = Math.floor(top / ROW_HEIGHT);
         
@@ -269,7 +269,7 @@ export function PianoRoll() {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = e.clientX - rect.left + e.currentTarget.scrollLeft;
                 const y = e.clientY - rect.top + e.currentTarget.scrollTop;
-                const SNAP = 0.25;
+                const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
                 const beat = Math.floor(x / BEAT_WIDTH / SNAP) * SNAP;
                 const keyIndex = Math.floor(y / ROW_HEIGHT);
                 if (keyIndex >= 0 && keyIndex < KEYS.length) {
@@ -337,7 +337,7 @@ export function PianoRoll() {
                                 const diffX = moveEvent.clientX - startX;
                                 const diffY = moveEvent.clientY - startY;
                                 
-                                const SNAP = 0.25;
+                                const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
                                 const diffBeats = Math.round((diffX / BEAT_WIDTH) / SNAP) * SNAP;
                                 const diffKeys = Math.round(diffY / ROW_HEIGHT);
                                 
@@ -369,7 +369,7 @@ export function PianoRoll() {
                                 
                                 const onMove = (moveEvent: PointerEvent) => {
                                     const diffX = moveEvent.clientX - startX;
-                                    const SNAP = 0.25;
+                                    const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
                                     const diffBeats = Math.round((diffX / BEAT_WIDTH) / SNAP) * SNAP;
                                     const newDuration = Math.max(SNAP, initialDuration + diffBeats);
                                     updateNote(clip.id, note.id, { duration: newDuration });
@@ -380,7 +380,7 @@ export function PianoRoll() {
                                     window.removeEventListener('pointerup', onUp);
                                     // Save the final duration
                                     const diffX = upEvent.clientX - startX;
-                                    const SNAP = 0.25;
+                                    const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
                                     const diffBeats = Math.round((diffX / BEAT_WIDTH) / SNAP) * SNAP;
                                     setLastNoteDuration(Math.max(SNAP, initialDuration + diffBeats));
                                 };
