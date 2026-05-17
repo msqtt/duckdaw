@@ -901,6 +901,24 @@ export function ArrangeView() {
                         >
                             Create Clip
                         </button>
+                        {tracks.find(t => t.id === contextMenu.trackId)?.type === 'audio' && (
+                            <label className="block w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white cursor-pointer">
+                                Upload Audio
+                                <input 
+                                    type="file" 
+                                    accept="audio/*" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                            const url = URL.createObjectURL(file);
+                                            addClip(contextMenu.trackId!, contextMenu.beat!, url);
+                                            setContextMenu(null);
+                                        }
+                                    }}
+                                />
+                            </label>
+                        )}
                     </>
                 ) : null}
             </div>
