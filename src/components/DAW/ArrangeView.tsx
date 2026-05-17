@@ -424,6 +424,7 @@ export function ArrangeView() {
   const [dragTrackDropIndex, setDragTrackDropIndex] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'track' | 'clip', id: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleDragEndGlobal = () => {
@@ -667,7 +668,15 @@ export function ArrangeView() {
                 />
             </div>
         </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div 
+           className="flex-1 overflow-y-auto custom-scrollbar" 
+           ref={sidebarRef}
+           onScroll={(e) => {
+               if (containerRef.current) {
+                   containerRef.current.scrollTop = e.currentTarget.scrollTop;
+               }
+           }}
+        >
           {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} dragTargetIndex={dragTrackDropIndex} setDragTargetIndex={setDragTrackDropIndex} />)}
           
           <Dropdown
@@ -694,6 +703,11 @@ export function ArrangeView() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onScroll={(e) => {
+            if (sidebarRef.current) {
+                sidebarRef.current.scrollTop = e.currentTarget.scrollTop;
+            }
+        }}
       >
         {/* Marquee box */}
         {marquee && (
@@ -710,7 +724,7 @@ export function ArrangeView() {
         
         {/* Timeline Ruler */}
         <div 
-          className="h-8 border-b border-neutral-300 dark:border-neutral-800 sticky top-0 z-10 flex text-xs text-neutral-500 overflow-visible cursor-crosshair bg-neutral-50 dark:bg-neutral-900"
+          className="h-8 border-b border-neutral-300 dark:border-neutral-800 sticky top-0 z-40 flex text-xs text-neutral-500 overflow-visible cursor-crosshair bg-neutral-50 dark:bg-neutral-900"
           style={{ width: `${totalBeats * PIXELS_PER_BEAT}px` }}
           onPointerDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();

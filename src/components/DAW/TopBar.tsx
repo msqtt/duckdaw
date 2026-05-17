@@ -6,6 +6,7 @@ import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
+import { MasterVisualizer } from './MasterVisualizer';
 
 export function TopBar() {
   const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
@@ -288,16 +289,15 @@ export function TopBar() {
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-1.5">
-             <button 
-                onClick={() => useDAWStore.getState().setSnapToGrid(!useDAWStore.getState().snapToGrid)}
-                className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded cursor-pointer transition-colors ${useDAWStore.getState().snapToGrid ? 'text-emerald-500 bg-emerald-500/10' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
+             <div 
+                className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded transition-colors text-emerald-500 bg-emerald-500/10 cursor-default select-none`}
+                title="Grid snap is always on"
              >
                  Grid
-             </button>
+             </div>
              <Dropdown
                options={gridSnapOptions}
                value={useDAWStore.getState().snapGridSize}
-               disabled={!useDAWStore.getState().snapToGrid}
                onChange={(val) => useDAWStore.getState().setSnapGridSize(parseFloat(val))}
                triggerClassName="bg-transparent font-mono text-neutral-900 dark:text-white text-xs cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none flex items-center gap-1"
              />
@@ -310,6 +310,9 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Visualizer */}
+        <MasterVisualizer />
+
         {/* Panel Toggles */}
         <div className="flex items-center bg-neutral-200 dark:bg-neutral-800 rounded-md p-1 mr-2">
             <button 
