@@ -12,9 +12,15 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         font-family: system-ui, -apple-system, sans-serif;
       }
+      #initial-loader.light-mode {
+        background: #f5f5f5; color: #171717;
+      }
       .loader-bar-container {
         width: 200px; height: 4px; background: #262626; border-radius: 4px; overflow: hidden;
         margin-top: 16px;
+      }
+      #initial-loader.light-mode .loader-bar-container {
+        background: #e5e5e5;
       }
       .loader-bar {
         height: 100%; width: 0%; background: #10b981;
@@ -38,6 +44,22 @@
       <div class="loader-bar-container"><div class="loader-bar"></div></div>
       <div class="loader-text">Loading Audio Engine...</div>
     </div>
+    <script>
+      try {
+        var storeStr = localStorage.getItem('daw-store');
+        var isLight = false;
+        if (storeStr) {
+           var store = JSON.parse(storeStr);
+           if (store && store.state && store.state.theme === 'light') isLight = true;
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+           isLight = true;
+        }
+        if (isLight) {
+          var loader = document.getElementById('initial-loader');
+          if (loader) loader.classList.add('light-mode');
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

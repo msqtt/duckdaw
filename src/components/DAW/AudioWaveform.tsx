@@ -49,7 +49,7 @@ export function AudioWaveform({ url }: { url?: string }) {
    return (
        <div className="w-full h-full object-cover px-1 flex items-center justify-between gap-[1px]">
           {peaks.map((p, i) => (
-             <div key={i} className="flex-1 bg-black dark:bg-white rounded-full transition-all" style={{ height: `${p}%` }} />
+             <div key={i} className="flex-1 bg-black/60 dark:bg-white/80 rounded-full transition-all" style={{ height: `${p}%` }} />
           ))}
        </div>
    );

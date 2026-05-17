@@ -73,7 +73,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
         
         <div className="flex-1 flex justify-center w-full relative min-h-[100px]">
             {/* Meter */}
-            <div className="w-1.5 h-full bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
+            <div className="w-1.5 h-full bg-neutral-300 dark:bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
                <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
             </div>
             {/* Slider */}
@@ -132,7 +132,7 @@ function MasterChannel() {
       <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2 mt-[68px]">
         <div className="flex-1 flex justify-center w-full relative min-h-[100px]">
             {/* Meter */}
-            <div className="w-1.5 h-full bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
+            <div className="w-1.5 h-full bg-neutral-300 dark:bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
                <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
             </div>
             {/* Slider */}

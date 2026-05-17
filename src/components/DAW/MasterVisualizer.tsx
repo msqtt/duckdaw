@@ -62,7 +62,7 @@ export function MasterVisualizer() {
 
     return (
         <div 
-           className="relative group bg-neutral-900 border border-neutral-700 w-48 h-8 flex-shrink-0 overflow-hidden cursor-pointer rounded grid place-items-center" 
+           className="relative group bg-neutral-200 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 w-48 h-8 flex-shrink-0 overflow-hidden cursor-pointer rounded grid place-items-center" 
            onClick={() => setMode(m => m === 'waveform' ? 'fft' : 'waveform')} 
            title={`Visualizer: ${mode.toUpperCase()} (Click to toggle)`}
         >
