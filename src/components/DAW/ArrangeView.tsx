@@ -15,7 +15,7 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
 
   return (
     <div 
-      draggable
+      draggable={!isEditing}
       onDragStart={(e) => {
           e.dataTransfer.setData('trackIndex', index.toString());
           e.dataTransfer.effectAllowed = 'move';
@@ -88,7 +88,14 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
         </div>
       </div>
       
-      <div className="flex items-center gap-2 mt-auto">
+      <div 
+        draggable
+        onDragStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        }}
+        className="flex items-center gap-2 mt-auto"
+      >
         <Volume2 size={14} className="text-neutral-500" />
         <input 
           type="range" 
@@ -137,7 +144,7 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
 
   return (
     <div
-      draggable
+      draggable={!isEditing}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onContextMenu={onContextMenu}
@@ -228,6 +235,8 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
         
         {/* Resize Handles */}
         <div 
+            draggable
+            onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
             className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/50 opacity-0 group-hover:opacity-100 transition-opacity z-20"
             onPointerDown={(e) => {
                 e.stopPropagation();
@@ -256,6 +265,8 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
             }}
         />
         <div 
+            draggable
+            onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
             className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/50 opacity-0 group-hover:opacity-100 transition-opacity z-20"
             onPointerDown={(e) => {
                 e.stopPropagation();
@@ -287,7 +298,21 @@ export function ArrangeView() {
   const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, snapGridSize, snapToGrid } = useDAWStore();
   const PIXELS_PER_BEAT = zoom; 
   const SNAP = snapToGrid ? snapGridSize : 0.015625; 
+  const VISUAL_SNAP = snapGridSize;
   const totalBeats = 1000; // Large timeline
+  
+  // Dynamic SVG Generator for Grid
+  const gridSVG = encodeURIComponent(`
+    <svg width="${PIXELS_PER_BEAT * 4}" height="24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0 0v24" stroke="rgba(128,128,128,0.3)" fill="none"/>
+      ${Array.from({ length: Math.round(4 / VISUAL_SNAP) - 1 }).map((_, i) => {
+        const x = (i + 1) * VISUAL_SNAP * PIXELS_PER_BEAT;
+        const isBeat = (i + 1) * VISUAL_SNAP % 1 < 0.001 || (i + 1) * VISUAL_SNAP % 1 > 0.999;
+        return `<path d="M${x} 0v24" stroke="rgba(128,128,128,${isBeat ? '0.15' : '0.05'})" stroke-dasharray="${isBeat ? '' : '1,3'}" fill="none"/>`;
+      }).join('')}
+    </svg>
+  `);
+
 
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
   const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number, widthBeats?: number } | null>(null);
@@ -407,7 +432,6 @@ export function ArrangeView() {
       const file = e.dataTransfer.files[0];
       const rect = e.currentTarget.getBoundingClientRect();
       const dropX = e.clientX - rect.left;
-      const SNAP = 0.25;
 
       if (file && file.type.startsWith('audio/')) {
           const beat = Math.max(0, Math.round((dropX / PIXELS_PER_BEAT) / SNAP) * SNAP);
@@ -580,8 +604,8 @@ export function ArrangeView() {
           {tracks.map(t => (
             <div 
                 key={t.id} 
-                className={`h-24 border-b border-neutral-300 dark:border-neutral-800 relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNFMkUyRTIiLz48L3N2Zz4=')] dark:bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiM0MDQwNDAiLz48L3N2Zz4=')]`}
-                style={{ backgroundSize: `${PIXELS_PER_BEAT}px 20px` }}
+                className="h-24 border-b border-neutral-300 dark:border-neutral-800 relative bg-repeat"
+                style={{ backgroundImage: `url('data:image/svg+xml;utf8,${gridSVG}')`, backgroundSize: `${PIXELS_PER_BEAT * 4}px 96px` }}
                 onDoubleClick={(e) => handleTrackLaneDoubleClick(t.id, e)}
                 onDragOver={(e) => handleDragOverTrack(t.id, e)}
                 onDragLeave={handleDragLeaveTrack}
@@ -591,7 +615,6 @@ export function ArrangeView() {
                     if ((e.target as HTMLElement).closest('.cursor-grab')) return;
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
-                    const SNAP = 0.25;
                     const beat = Math.round((clickX / PIXELS_PER_BEAT) / SNAP) * SNAP;
                     setContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, beat });
                 }}

@@ -205,11 +205,16 @@ export function TopBar() {
                disabled={!useDAWStore.getState().snapToGrid}
                onChange={(e) => useDAWStore.getState().setSnapGridSize(parseFloat(e.target.value))}
              >
-               <option className="text-black" value={4}>Bar</option>
-               <option className="text-black" value={1}>1/4</option>
-               <option className="text-black" value={0.5}>1/8</option>
-               <option className="text-black" value={0.25}>1/16</option>
-               <option className="text-black" value={0.125}>1/32</option>
+                <option className="text-black" value={4}>Bar</option>
+                <option className="text-black" value={2}>1/2</option>
+                <option className="text-black" value={1}>1/4</option>
+                <option className="text-black" value={2/3}>1/4T</option>
+                <option className="text-black" value={0.5}>1/8</option>
+                <option className="text-black" value={1/3}>1/8T</option>
+                <option className="text-black" value={0.25}>1/16</option>
+                <option className="text-black" value={1/6}>1/16T</option>
+                <option className="text-black" value={0.125}>1/32</option>
+                <option className="text-black" value={1/12}>1/32T</option>
              </select>
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />

@@ -29,6 +29,19 @@ export function PianoRoll() {
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, noteId?: string, beat?: number } | null>(null);
 
+  const VISUAL_SNAP = snapGridSize;
+  const PIXELS_PER_BEAT = BEAT_WIDTH;
+  const gridSVG = encodeURIComponent(`
+    <svg width="${PIXELS_PER_BEAT * 4}" height="${ROW_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0 ${ROW_HEIGHT}L${PIXELS_PER_BEAT * 4} ${ROW_HEIGHT}M0 0v${ROW_HEIGHT}" stroke="rgba(128,128,128,0.3)" fill="none"/>
+      ${Array.from({ length: Math.round(4 / VISUAL_SNAP) - 1 }).map((_, i) => {
+        const x = (i + 1) * VISUAL_SNAP * PIXELS_PER_BEAT;
+        const isBeat = (i + 1) * VISUAL_SNAP % 1 < 0.001 || (i + 1) * VISUAL_SNAP % 1 > 0.999;
+        return `<path d="M${x} 0v${ROW_HEIGHT}" stroke="rgba(128,128,128,${isBeat ? '0.15' : '0.05'})" stroke-dasharray="${isBeat ? '' : '1,3'}" fill="none"/>`;
+      }).join('')}
+    </svg>
+  `);
+
   useEffect(() => {
      const handleKeyDown = (e: KeyboardEvent) => {
          if (e.key === 'q' || e.key === 'Q') {
@@ -311,7 +324,8 @@ export function PianoRoll() {
           <div 
             className="relative bg-repeat"
             style={{ 
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='${BEAT_WIDTH}' height='${ROW_HEIGHT}' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 ${ROW_HEIGHT}L${BEAT_WIDTH} ${ROW_HEIGHT}M${BEAT_WIDTH} 0L${BEAT_WIDTH} ${ROW_HEIGHT}' stroke='rgba(128,128,128,0.2)' fill='none'/%3E%3Cpath d='M${BEAT_WIDTH/4} 0L${BEAT_WIDTH/4} ${ROW_HEIGHT}M${BEAT_WIDTH/2} 0L${BEAT_WIDTH/2} ${ROW_HEIGHT}M${BEAT_WIDTH*0.75} 0L${BEAT_WIDTH*0.75} ${ROW_HEIGHT}' stroke='rgba(128,128,128,0.1)' stroke-dasharray='1,3' fill='none'/%3E%3C/svg%3E")`,
+                backgroundImage: `url('data:image/svg+xml;utf8,${gridSVG}')`,
+                backgroundSize: `${PIXELS_PER_BEAT * 4}px ${ROW_HEIGHT}px`,
                 height: KEYS.length * ROW_HEIGHT,
                 width: Math.max(clip.duration * BEAT_WIDTH, 1200)
             }}
