@@ -19,11 +19,16 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
   const isSelected = selectedTrackId === track.id;
   const [isEditing, setIsEditing] = useState(false);
   const [nameInput, setNameInput] = useState(track.name);
+  const [canDrag, setCanDrag] = useState(true);
 
   return (
     <div 
-      draggable={!isEditing}
+      draggable={!isEditing && canDrag}
       onDragStart={(e) => {
+          if ((e.target as HTMLElement).tagName === 'INPUT') {
+              e.preventDefault();
+              return;
+          }
           e.dataTransfer.setData('text/plain', `track:${index}`);
           e.dataTransfer.setData('trackIndex', index.toString());
           e.dataTransfer.effectAllowed = 'move';
@@ -104,24 +109,36 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
         </div>
         
         <div className="flex items-center gap-2 justify-between">
-            <div className="flex items-center gap-1">
+            <div 
+                className="flex items-center gap-1"
+                onMouseEnter={() => setCanDrag(false)}
+                onMouseLeave={() => setCanDrag(true)}
+                onTouchStart={() => setCanDrag(false)}
+                onTouchEnd={() => setCanDrag(true)}
+            >
                 <button 
-                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${track.muted ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
-                  onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { muted: !track.muted }); }}
+                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${track.isMuted ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
+                  onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { isMuted: !track.isMuted }); }}
                   title="Mute"
                 >
-                    {track.muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                    {track.isMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
                 </button>
                 <button 
-                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${track.solo ? 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
-                  onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { solo: !track.solo }); }}
+                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${track.isSolo ? 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
+                  onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { isSolo: !track.isSolo }); }}
                   title="Solo"
                 >
                     <Headphones size={12} />
                 </button>
             </div>
             
-            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div 
+                className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                onMouseEnter={() => setCanDrag(false)}
+                onMouseLeave={() => setCanDrag(true)}
+                onTouchStart={() => setCanDrag(false)}
+                onTouchEnd={() => setCanDrag(true)}
+            >
                 <button 
                     className="p-1 text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
                     onClick={(e) => {
@@ -147,7 +164,13 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
         </div>
         
         {/* Volume slider */}
-        <div className="mt-2 flex items-center gap-2 group/vol">
+        <div 
+           className="mt-2 flex items-center gap-2 group/vol"
+           onMouseEnter={() => setCanDrag(false)}
+           onMouseLeave={() => setCanDrag(true)}
+           onTouchStart={() => setCanDrag(false)}
+           onTouchEnd={() => setCanDrag(true)}
+        >
             <span className="text-[10px] text-neutral-400 w-3">Vol</span>
             <input 
                 type="range" 

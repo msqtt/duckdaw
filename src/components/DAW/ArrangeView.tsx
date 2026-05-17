@@ -12,7 +12,7 @@ import { ClipItem, currentDragContext, setDragContext } from './ClipItem';
 import { useShallow } from 'zustand/react/shallow';
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop } = useDAWStore(useShallow(state => ({
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
       clips: state.clips,
       addTrack: state.addTrack,
@@ -25,6 +25,7 @@ export function ArrangeView() {
       selectClip: state.selectClip,
       selectedClipIds: state.selectedClipIds,
       deleteClip: state.deleteClip,
+      deleteTrack: state.deleteTrack,
       snapGridSize: state.snapGridSize,
       snapToGrid: state.snapToGrid,
       loopStart: state.loopStart,
