@@ -14,7 +14,7 @@ import { useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
 
 export default function App() {
-  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, loopStart, loopEnd } = useDAWStore();
+  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isMicRecording } = useDAWStore();
   const [init, setInit] = useState(false);
 
   useEffect(() => {
@@ -130,8 +130,59 @@ export default function App() {
   }, [metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions]);
 
   useEffect(() => {
+    engine.setMasterVolume(masterVolume);
+  }, [masterVolume]);
+
+  useEffect(() => {
     engine.setLoop(isLooping, loopStart, loopEnd);
   }, [isLooping, loopStart, loopEnd]);
+
+  useEffect(() => {
+    const handleMicState = async () => {
+      const state = useDAWStore.getState();
+      
+      if (state.isMicRecording) {
+        // Start recording
+        try {
+          // Check permissions first to be safe
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+          await engine.micRecorder.start();
+          if (!state.isPlaying) {
+             engine.play();
+             state.togglePlay();
+          }
+        } catch (e: any) {
+          console.error("Microphone access denied", e);
+          if (window.self !== window.top) {
+              alert("Microphone access denied. Please open the app in a new tab to use the microphone.");
+          } else {
+              alert("Microphone access denied: " + e.message);
+          }
+          state.toggleMicRecording(); // toggle back
+        }
+      } else {
+        // Stop recording
+        if (engine.micRecorder.mediaRecorder && engine.micRecorder.mediaRecorder.state !== "inactive") {
+           const url = await engine.micRecorder.stop();
+           if (url && state.selectedTrackId) {
+               const track = state.tracks.find(t => t.id === state.selectedTrackId);
+               if (track && track.type === 'audio') {
+                   // Calculate current position in beats to snap it roughly
+                   const pos = Array.isArray(Tone.Transport.position) ? Tone.Transport.position[0] : parseInt(Tone.Transport.position.toString().split(':')[0]);
+                   // For now, let's just place it at 0 or position. Since we don't have exactly Tone.js position synced to record time perfectly, let's place it at loopStart or 0 for now.
+                   // A better way is Tone.Transport.position beats
+                   const parts = Tone.Transport.position.toString().split(':');
+                   const currentBeat = parseInt(parts[0]) * 4 + parseInt(parts[1]);
+                   state.addClip(state.selectedTrackId, currentBeat, url);
+               } else {
+                   alert("Please select an Audio track to place the recorded clip.");
+               }
+           }
+        }
+      }
+    };
+    handleMicState();
+  }, [isMicRecording]);
 
   useEffect(() => {
     // Initialize system theme

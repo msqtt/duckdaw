@@ -64,6 +64,7 @@ interface DAWState {
   metronomeVolume: number;
   metronomeSound: 'click' | 'woodblock' | 'electronic';
   metronomeSubdivisions: number;
+  masterVolume: number;
   tracks: Track[];
   clips: Clip[];
   selectedTrackId: string | null;
@@ -72,6 +73,7 @@ interface DAWState {
   clipboardClips: Clip[];
   clipboardNotes: Note[];
   isRecording: boolean;
+  isMicRecording: boolean;
   bottomPanel: BottomPanel;
   panelHeight: number;
   panelFullScreen: boolean;
@@ -93,6 +95,7 @@ interface DAWState {
   setMetronomeVolume: (volume: number) => void;
   setMetronomeSound: (sound: 'click' | 'woodblock' | 'electronic') => void;
   setMetronomeSubdivisions: (subdivisions: number) => void;
+  setMasterVolume: (volume: number) => void;
   toggleTheme: (mode?: ThemeMode) => void;
   setBottomPanel: (panel: BottomPanel) => void;
   setPanelHeight: (height: number) => void;
@@ -118,6 +121,7 @@ interface DAWState {
   deleteNote: (clipId: string, noteId: string) => void;
   quantizeSelectedNotes: (clipId: string) => void;
   toggleRecording: () => void;
+  toggleMicRecording: () => void;
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -148,7 +152,9 @@ export const dawStore = createStore<DAWState>()(
       metronomeVolume: 0.8,
       metronomeSound: 'click',
       metronomeSubdivisions: 1,
+      masterVolume: 0.8,
       isRecording: false,
+      isMicRecording: false,
       selectedClipIds: ['clip-1'],
       selectedNoteIds: [],
       clipboardClips: [],
@@ -265,6 +271,7 @@ export const dawStore = createStore<DAWState>()(
       setMetronomeVolume: (volume) => set({ metronomeVolume: volume }),
       setMetronomeSound: (sound) => set({ metronomeSound: sound }),
       setMetronomeSubdivisions: (subdivisions) => set({ metronomeSubdivisions: subdivisions }),
+      setMasterVolume: (volume) => set({ masterVolume: volume }),
       toggleTheme: (mode) => set((state) => {
         let newTheme = mode;
         if (!newTheme) {
@@ -300,7 +307,7 @@ export const dawStore = createStore<DAWState>()(
         return { bpm: state.bpm, tracks: state.tracks, clips: state.clips };
       },
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      stop: () => set({ isPlaying: false, isRecording: false }),
+      stop: () => set({ isPlaying: false, isRecording: false, isMicRecording: false }),
       addTrack: (type) => set((state) => {
         const newTrack: Track = {
           id: generateId(),
@@ -439,7 +446,8 @@ export const dawStore = createStore<DAWState>()(
           return c;
         })
       })),
-      toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying }))
+      toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying })),
+      toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying }))
     }),
     {
       partialize: (state) => {

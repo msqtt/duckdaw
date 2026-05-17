@@ -6,7 +6,7 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 
 export function TopBar() {
-  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
+  const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
   const [showSettings, setShowSettings] = useState(false);
@@ -58,19 +58,7 @@ export function TopBar() {
   };
 
   const handleMicRecord = async () => {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        alert("Microphone access granted. Ready to record audio clips (not fully implemented in MVP).");
-        // We would process stream with MediaRecorder and Tone.UserMedia here
-        stream.getTracks().forEach(track => track.stop());
-    } catch (e: any) {
-        console.error("Microphone access denied", e);
-        if (window.self !== window.top) {
-            alert("Microphone access denied. Please open the app in a new tab to use the microphone.");
-        } else {
-            alert("Microphone access denied: " + e.message);
-        }
-    }
+    toggleMicRecording();
   };
 
   return (
@@ -121,11 +109,11 @@ export function TopBar() {
             <Circle size={20} className={isRecording ? 'fill-red-600 dark:fill-red-500' : 'fill-neutral-600 dark:fill-neutral-300'} />
           </button>
           <button 
-            className="p-2 rounded transition-colors hover:bg-neutral-300 dark:hover:bg-neutral-700"
+            className={`p-2 rounded transition-colors ${isMicRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
             onClick={handleMicRecord}
             title="Record Audio (Mic)"
           >
-            <Mic size={20} className="fill-neutral-600 dark:fill-neutral-300" />
+            <Mic size={20} className={isMicRecording ? 'stroke-red-600 dark:stroke-red-500 fill-red-600/20 dark:fill-red-500/20' : 'fill-neutral-600 dark:fill-neutral-300'} />
           </button>
           
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700 mx-1" />

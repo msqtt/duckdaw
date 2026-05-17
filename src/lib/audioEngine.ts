@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
 import { Clip, Track } from '../store/dawStore';
+import { MicRecorder } from './recorder';
 
 class AudioEngine {
   synths: Map<string, Tone.PolySynth | Tone.Sampler>;
@@ -11,6 +12,8 @@ class AudioEngine {
   delays: Map<string, Tone.FeedbackDelay>;
   metronome: Tone.MembraneSynth | null = null;
   metronomeLoop: Tone.Loop | null = null;
+  masterMeter: Tone.Meter | null = null;
+  micRecorder: MicRecorder;
   
   constructor() {
     this.synths = new Map();
@@ -20,6 +23,10 @@ class AudioEngine {
     this.partMap = new Map();
     this.reverbs = new Map();
     this.delays = new Map();
+    this.micRecorder = new MicRecorder();
+    
+    this.masterMeter = new Tone.Meter();
+    Tone.Destination.connect(this.masterMeter);
   }
 
   getMeter(trackId: string): Tone.Meter | undefined {
@@ -122,6 +129,10 @@ class AudioEngine {
 
   pause() {
     Tone.Transport.pause();
+  }
+
+  setMasterVolume(volume: number) {
+      Tone.Destination.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume);
   }
   
   syncTracks(tracks: Track[]) {

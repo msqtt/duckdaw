@@ -26,7 +26,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   }, [track.id]);
 
   return (
-    <div className="w-24 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
+    <div className="w-32 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
       <div className="text-xs font-bold truncate w-full px-2 text-center text-neutral-600 dark:text-neutral-300 pointer-events-none mb-2">
         {track.name}
       </div>
@@ -80,7 +80,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
               min="0" max="1" step="0.01" 
               value={track.volume}
               onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
-              className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-4 top-0"
+              className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-6 top-0"
               style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
             />
         </div>
@@ -95,6 +95,59 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
             onChange={(e) => updateTrack(track.id, { pan: parseFloat(e.target.value) })}
             className="w-full accent-blue-500 h-1 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize"
           />
+      </div>
+    </div>
+  );
+}
+
+function MasterChannel() {
+  const { masterVolume, setMasterVolume } = useDAWStore();
+  const meterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+     let animationFrameId: number;
+     const updateMeter = () => {
+         if (meterRef.current) {
+             const val = engine.masterMeter?.getValue() ?? -100;
+             let height = 0;
+             if (typeof val === 'number') {
+                 height = val <= -60 ? 0 : ((val + 60) / 60) * 100;
+             }
+             meterRef.current.style.height = `${Math.min(100, Math.max(0, height))}%`;
+         }
+         animationFrameId = requestAnimationFrame(updateMeter);
+     };
+     updateMeter();
+     return () => cancelAnimationFrame(animationFrameId);
+  }, []);
+
+  return (
+    <div className="w-32 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-l border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full shadow-[-4px_0_10px_rgba(0,0,0,0.1)] z-10 sticky right-0">
+      <div className="text-xs font-bold truncate w-full px-2 text-center text-red-600 dark:text-red-500 pointer-events-none mb-2">
+        MASTER
+      </div>
+      
+      <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2 mt-[68px]">
+        <div className="flex-1 flex justify-center w-full relative min-h-[100px]">
+            {/* Meter */}
+            <div className="w-1.5 h-full bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
+               <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
+            </div>
+            {/* Slider */}
+            <input 
+              type="range" 
+              min="0" max="1" step="0.01" 
+              value={masterVolume}
+              onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
+              className="h-full hover:cursor-ns-resize accent-red-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-6 top-0"
+              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+            />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col items-center w-full px-2 opacity-0 pointer-events-none">
+         <span className="text-[10px] text-neutral-500 font-mono mb-1">PAN</span>
+         <input type="range" className="w-full h-1" />
       </div>
     </div>
   );
@@ -144,10 +197,11 @@ export function Mixer() {
             </button>
         </div>
       </div>
-      <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950">
+      <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950 pr-4">
          {tracks.map(track => (
            <MixerChannel key={track.id} track={track} />
          ))}
+         <MasterChannel />
       </div>
     </div>
   );

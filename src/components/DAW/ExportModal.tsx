@@ -92,7 +92,7 @@ export function ExportModal() {
     try {
         const renderDuration = Math.max(1, totalDurationSeconds);
 
-        const renderedToneBuffer = await Tone.Offline(async ({ context }) => {
+        const renderedToneBuffer = await Tone.Offline(async () => {
              Tone.Transport.bpm.value = bpm;
              Tone.getContext().lookAhead = 0;
 
@@ -111,7 +111,7 @@ export function ExportModal() {
                  const delay = new Tone.FeedbackDelay("8n", 0.3);
                  reverb.wet.value = track.reverb || 0;
                  delay.wet.value = track.delay || 0;
-                 channel.chain(delay, reverb, context.destination);
+                 channel.chain(delay, reverb, Tone.Destination);
                  
                  channels.set(track.id, channel);
 
