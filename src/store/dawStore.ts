@@ -55,6 +55,7 @@ interface DAWState {
   panelFullScreen: boolean;
   exportModalOpen: boolean;
   zoom: number; // Pixels per beat
+  lastNoteDuration: number;
   
   // Actions
   setBpm: (bpm: number) => void;
@@ -79,6 +80,7 @@ interface DAWState {
   selectClip: (id: string | null, multi?: boolean) => void;
   selectNote: (id: string | null, multi?: boolean) => void;
   setClipboard: (type: 'clips' | 'notes', items: any[]) => void;
+  setLastNoteDuration: (duration: number) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   updateClip: (id: string, updates: Partial<Clip>) => void;
   addNote: (clipId: string, note: Note) => void;
@@ -101,6 +103,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   panelHeight: 300,
   panelFullScreen: false,
   exportModalOpen: false,
+  lastNoteDuration: 0.5,
   theme: 'dark',
   isPlaying: false,
   isRecording: false,
@@ -204,6 +207,7 @@ export const useDAWStore = create<DAWState>((set, get) => ({
   setPanelHeight: (height: number) => set({ panelHeight: height }),
   setPanelFullScreen: (fs: boolean) => set({ panelFullScreen: fs }),
   setExportModalOpen: (open: boolean) => set({ exportModalOpen: open }),
+  setLastNoteDuration: (duration: number) => set({ lastNoteDuration: duration }),
   toggleTheme: (mode?: ThemeMode) => set((state) => {
     let newTheme = mode;
     if (!newTheme) {

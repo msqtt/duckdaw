@@ -178,17 +178,22 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
         {/* Draw miniature notes if midi */}
         {clip.type === 'midi' && clip.notes && (
             <div className="absolute bottom-1 left-2 pl-0 right-2 top-5 flex pointer-events-none">
-                {clip.notes.map(note => (
-                    <div 
-                        key={note.id}
-                        className="absolute h-1 bg-black/40 rounded-full"
-                        style={{
-                            left: `${(note.start / clip.duration) * 100}%`,
-                            width: `${Math.max(2, (note.duration / clip.duration) * 100)}%`,
-                            bottom: `${Math.random() * 80}%` // Dummy y-position for preview
-                        }}
-                    />
-                ))}
+                {clip.notes.map(note => {
+                    let midi = 60;
+                    try { midi = Tone.Frequency(note.note).toMidi(); } catch(e) {}
+                    const yPct = Math.max(0, Math.min(100, ((midi - 36) / 48) * 100));
+                    return (
+                        <div 
+                            key={note.id}
+                            className="absolute h-1 bg-black/60 dark:bg-white/60 rounded-full"
+                            style={{
+                                left: `${(note.start / clip.duration) * 100}%`,
+                                width: `${Math.max(2, (note.duration / clip.duration) * 100)}%`,
+                                bottom: `${yPct * 0.8}%`
+                            }}
+                        />
+                    );
+                })}
             </div>
         )}
         
@@ -257,6 +262,7 @@ export function ArrangeView() {
   const totalBeats = 1000; // Large timeline
 
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
+  const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleTrackLaneDoubleClick = (trackId: string, e: React.MouseEvent<HTMLDivElement>) => {
@@ -332,8 +338,25 @@ export function ArrangeView() {
       setMarquee(null);
   };
 
+  const handleDragOverTrack = (trackId: string, e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const SNAP = 0.25;
+      const snappedBeat = Math.round((clickX / PIXELS_PER_BEAT) / SNAP) * SNAP;
+      if (dragSnap?.trackId !== trackId || dragSnap?.beat !== snappedBeat) {
+          setDragSnap({ trackId, beat: snappedBeat });
+      }
+  };
+
+  const handleDragLeaveTrack = (e: React.DragEvent) => {
+      // Small debounce could prevent flicker, but nulling is safest strictly when leaving
+  };
+
   const handleDrop = (trackId: string, e: React.DragEvent) => {
       e.preventDefault();
+      setDragSnap(null); // Reset snap guide
       const clipId = e.dataTransfer.getData('text/plain');
       const action = e.dataTransfer.getData('action');
       if (!clipId) return;
@@ -341,7 +364,7 @@ export function ArrangeView() {
       const rect = e.currentTarget.getBoundingClientRect();
       const dropX = e.clientX - rect.left;
       const SNAP = 0.25;
-      const beat = Math.floor(dropX / PIXELS_PER_BEAT / SNAP) * SNAP;
+      const beat = Math.round((dropX / PIXELS_PER_BEAT) / SNAP) * SNAP;
 
       if (action === 'copy' || e.altKey) {
           useDAWStore.getState().duplicateClip(clipId);
@@ -468,7 +491,8 @@ export function ArrangeView() {
                 className={`h-24 border-b border-neutral-300 dark:border-neutral-800 relative bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNFMkUyRTIiLz48L3N2Zz4=')] dark:bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiM0MDQwNDAiLz48L3N2Zz4=')]`}
                 style={{ backgroundSize: `${PIXELS_PER_BEAT}px 20px` }}
                 onDoubleClick={(e) => handleTrackLaneDoubleClick(t.id, e)}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; }}
+                onDragOver={(e) => handleDragOverTrack(t.id, e)}
+                onDragLeave={handleDragLeaveTrack}
                 onDrop={(e) => handleDrop(t.id, e)}
                 onContextMenu={(e) => {
                     e.preventDefault();
@@ -476,10 +500,16 @@ export function ArrangeView() {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
                     const SNAP = 0.25;
-                    const beat = Math.floor(clickX / PIXELS_PER_BEAT / SNAP) * SNAP;
+                    const beat = Math.round((clickX / PIXELS_PER_BEAT) / SNAP) * SNAP;
                     setContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, beat });
                 }}
             >
+                {dragSnap?.trackId === t.id && (
+                    <div 
+                        className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-10 pointer-events-none"
+                        style={{ left: `${dragSnap.beat * PIXELS_PER_BEAT}px` }}
+                    />
+                )}
                 {clips.filter(c => c.trackId === t.id).map(c => (
                     <ClipItem 
                         key={c.id} 

@@ -3,6 +3,11 @@ import { useDAWStore } from '../../store/dawStore';
 import { Download, X, Film, CheckCircle2, Loader2, Music } from 'lucide-react';
 import * as Tone from 'tone';
 
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
+
+let ffmpeg: FFmpeg | null = null;
+
 // Simple WAV encoder for the MVP
 function audioBufferToWav(buffer: AudioBuffer) {
   const numChannels = buffer.numberOfChannels;
@@ -78,35 +83,103 @@ export function ExportModal() {
     // Simulate rendering progress since Tone.Offline doesn't easily report intermediate progress
     const updateProgress = () => {
         setProgress(p => {
-            if (p >= 90) return p;
+            if (p >= 50) return p;
             return p + 5;
         });
     };
     const interval = setInterval(updateProgress, 100);
 
     try {
-        // Here we could use Tone.Offline.
-        // For standard tone setup in MVP we often just simulate offline render to match the engine.
-        // Real Tone.Offline implementation requires duplicating the scheduling logic from audioEngine.
-        
-        // Simulating the render time based on duration (very fast usually)
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
+        const renderDuration = Math.max(1, totalDurationSeconds);
+
+        const renderedToneBuffer = await Tone.Offline(async () => {
+             Tone.Transport.bpm.value = bpm;
+             Tone.getContext().lookAhead = 0;
+
+             const synths = new Map();
+             const channels = new Map();
+             for (const track of tracks) {
+                 const channel = new Tone.Channel().toDestination();
+                 channel.volume.value = track.volume === 0 ? -Infinity : 20 * Math.log10(track.volume);
+                 channel.pan.value = track.pan;
+                 channel.mute = track.isMuted;
+                 channel.solo = track.isSolo;
+                 channels.set(track.id, channel);
+
+                 if (track.type === 'midi') {
+                     let synth;
+                     switch(track.instrument) {
+                        case 'piano':
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.02, decay: 1, sustain: 0.4, release: 1 } });
+                            break;
+                        case 'bass':
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 } });
+                            break;
+                        case 'drum':
+                            synth = new Tone.PolySynth(Tone.MembraneSynth);
+                            break;
+                        case 'synth':
+                        default:
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } });
+                            break;
+                     }
+                     synth.connect(channel);
+                     synths.set(track.id, synth);
+                 }
+             }
+
+             const beatTime = 60 / bpm;
+             for (const clip of clips) {
+                 if (clip.type === 'midi' && clip.notes) {
+                     const synth = synths.get(clip.trackId);
+                     if (!synth) continue;
+                     
+                     clip.notes.forEach(note => {
+                         const absoluteStartBeat = clip.start + note.start;
+                         const startTimeSeconds = absoluteStartBeat * beatTime;
+                         const durationSeconds = note.duration * beatTime;
+                         synth.triggerAttackRelease(note.note, durationSeconds, startTimeSeconds, note.velocity);
+                     });
+                 }
+             }
+             
+             Tone.Transport.start(0);
+        }, renderDuration);
+
         clearInterval(interval);
-        setProgress(100);
+        setProgress(50);
         setStatus('encoding');
+
+        const audioBuffer = renderedToneBuffer.get();
+        let finalBlob = audioBufferToWav(audioBuffer);
+
+        if (format !== 'wav') {
+            if (!ffmpeg) {
+                ffmpeg = new FFmpeg();
+                ffmpeg.on('progress', ({ progress: p }) => {
+                    setProgress(50 + Math.round(p * 50));
+                });
+                await ffmpeg.load({
+                    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+                    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+                });
+            }
+
+            const inputName = 'input.wav';
+            const outputName = `output.${format}`;
+            
+            const wavData = new Uint8Array(await finalBlob.arrayBuffer());
+            await ffmpeg.writeFile(inputName, wavData);
+            
+            await ffmpeg.exec(['-i', inputName, outputName]);
+            
+            const outputData = await ffmpeg.readFile(outputName);
+            finalBlob = new Blob([outputData], { type: `audio/${format}` });
+        } else {
+            setProgress(100);
+        }
         
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate encoding time
-        
-        // Generate a 1-second silence WAV to download or a simple beep
-        const sampleRateNum = parseInt(sampleRate);
-        const ctx = new OfflineAudioContext(2, sampleRateNum * Math.max(1, totalDurationSeconds), sampleRateNum);
-        
-        // We'll just generate a simple file
-        const renderedBuffer = ctx.createBuffer(2, sampleRateNum * Math.max(1, totalDurationSeconds), sampleRateNum);
-        const wavBlob = audioBufferToWav(renderedBuffer);
-        
-        const url = URL.createObjectURL(wavBlob);
+        const url = URL.createObjectURL(finalBlob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `project_export_${Date.now()}.${format}`;

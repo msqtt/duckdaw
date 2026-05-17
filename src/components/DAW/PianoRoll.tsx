@@ -20,7 +20,7 @@ function generateKeys() {
 const KEYS = generateKeys();
 
 export function PianoRoll() {
-  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote } = useDAWStore();
+  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote, lastNoteDuration, setLastNoteDuration } = useDAWStore();
   const [clip, setClip] = useState<Clip | null>(null);
   const [clipTrackColor, setClipTrackColor] = useState<string>('#E2E8F0');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -153,7 +153,7 @@ export function PianoRoll() {
               id: Math.random().toString(36).substr(2, 9),
               note: noteName,
               start: beat,
-              duration: 0.5,
+              duration: lastNoteDuration,
               velocity: 0.8
           };
           addNote(clip.id, newNote);
@@ -291,7 +291,7 @@ export function PianoRoll() {
           <div 
             className="relative bg-repeat"
             style={{ 
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='${BEAT_WIDTH}' height='${ROW_HEIGHT}' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 ${ROW_HEIGHT}L${BEAT_WIDTH} ${ROW_HEIGHT}M${BEAT_WIDTH} 0L${BEAT_WIDTH} ${ROW_HEIGHT}' stroke='%232A2A2A' fill='none'/%3E%3Cpath d='M${BEAT_WIDTH/4} 0L${BEAT_WIDTH/4} ${ROW_HEIGHT}M${BEAT_WIDTH/2} 0L${BEAT_WIDTH/2} ${ROW_HEIGHT}M${BEAT_WIDTH*0.75} 0L${BEAT_WIDTH*0.75} ${ROW_HEIGHT}' stroke='%231E1E1E' stroke-dasharray='2,2' fill='none'/%3E%3C/svg%3E")`,
+                backgroundImage: `url("data:image/svg+xml,%3Csvg width='${BEAT_WIDTH}' height='${ROW_HEIGHT}' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 ${ROW_HEIGHT}L${BEAT_WIDTH} ${ROW_HEIGHT}M${BEAT_WIDTH} 0L${BEAT_WIDTH} ${ROW_HEIGHT}' stroke='rgba(128,128,128,0.2)' fill='none'/%3E%3Cpath d='M${BEAT_WIDTH/4} 0L${BEAT_WIDTH/4} ${ROW_HEIGHT}M${BEAT_WIDTH/2} 0L${BEAT_WIDTH/2} ${ROW_HEIGHT}M${BEAT_WIDTH*0.75} 0L${BEAT_WIDTH*0.75} ${ROW_HEIGHT}' stroke='rgba(128,128,128,0.1)' stroke-dasharray='1,3' fill='none'/%3E%3C/svg%3E")`,
                 height: KEYS.length * ROW_HEIGHT,
                 width: Math.max(clip.duration * BEAT_WIDTH, 1200)
             }}
@@ -375,9 +375,14 @@ export function PianoRoll() {
                                     updateNote(clip.id, note.id, { duration: newDuration });
                                 };
                                 
-                                const onUp = () => {
+                                const onUp = (upEvent: PointerEvent) => {
                                     window.removeEventListener('pointermove', onMove);
                                     window.removeEventListener('pointerup', onUp);
+                                    // Save the final duration
+                                    const diffX = upEvent.clientX - startX;
+                                    const SNAP = 0.25;
+                                    const diffBeats = Math.round((diffX / BEAT_WIDTH) / SNAP) * SNAP;
+                                    setLastNoteDuration(Math.max(SNAP, initialDuration + diffBeats));
                                 };
                                 
                                 window.addEventListener('pointermove', onMove);
@@ -436,7 +441,7 @@ export function PianoRoll() {
                                   id: Math.random().toString(36).substr(2, 9),
                                   note: contextMenu.noteId!, // Note name was passed here temporarily
                                   start: contextMenu.beat!,
-                                  duration: 0.5,
+                                  duration: lastNoteDuration,
                                   velocity: 0.8
                               };
                               addNote(clip.id, newNote);

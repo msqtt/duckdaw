@@ -75,7 +75,7 @@ export function TopBar() {
     <div className="h-14 bg-neutral-100 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-800 flex items-center justify-between px-4 text-neutral-700 dark:text-neutral-300 select-none">
       <div className="flex items-center gap-6">
         <h1 className="text-xl font-bold text-neutral-900 dark:text-white tracking-widest flex items-center gap-2">
-            🦆 Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
+            Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
         </h1>
         
         {/* Transport Controls */}
@@ -109,30 +109,6 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-4 bg-neutral-200 dark:bg-neutral-800 rounded-md px-3 py-1.5 h-10">
-          <div className="flex items-center gap-1">
-             <button 
-                title="System Theme"
-                className={`w-6 h-6 rounded flex flex-col items-center justify-center transition-colors ${theme === 'system' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-                onClick={() => toggleTheme('system')}
-             >
-                <div className="text-[10px] font-bold leading-none select-none">A</div>
-             </button>
-             <button 
-                title="Light Theme"
-                className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-                onClick={() => toggleTheme('light')}
-             >
-                <div className="w-3 h-3 rounded-full border-2 border-current bg-white" />
-             </button>
-             <button 
-                title="Dark Theme"
-                className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-                onClick={() => toggleTheme('dark')}
-             >
-                <div className="w-3 h-3 rounded-full border-2 border-current bg-black" />
-             </button>
-          </div>
-          <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase text-neutral-500 font-bold">BPM</span>
             <input 
@@ -160,16 +136,25 @@ export function TopBar() {
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-2">
-            <span className="text-xs uppercase text-neutral-500 font-bold">Time</span>
-            <span 
-              className="font-mono text-neutral-900 dark:text-white text-sm cursor-pointer hover:text-emerald-500 transition-colors"
-              onClick={() => {
-                  let newNum = timeSignature[0] >= 12 ? 2 : timeSignature[0] + 1;
-                  setTimeSignature([newNum, 4]);
-              }}
-            >
-              {timeSignature[0]}/{timeSignature[1]}
-            </span>
+             <span className="text-xs uppercase text-neutral-500 font-bold">Time</span>
+             <select 
+               className="bg-transparent font-mono text-neutral-900 dark:text-white text-sm cursor-pointer hover:text-emerald-500 transition-colors focus:outline-none appearance-none"
+               value={`${timeSignature[0]}/${timeSignature[1]}`}
+               onChange={(e) => {
+                   const [num, den] = e.target.value.split('/').map(Number);
+                   setTimeSignature([num, den]);
+                   Tone.Transport.timeSignature = [num, den];
+               }}
+             >
+               <option value="2/4">2/4</option>
+               <option value="3/4">3/4</option>
+               <option value="4/4">4/4</option>
+               <option value="5/4">5/4</option>
+               <option value="6/8">6/8</option>
+               <option value="7/8">7/8</option>
+               <option value="9/8">9/8</option>
+               <option value="12/8">12/8</option>
+             </select>
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="font-mono w-20 text-center text-sm font-semibold tracking-wider tabular-nums">

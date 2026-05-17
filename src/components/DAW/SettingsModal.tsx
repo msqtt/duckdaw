@@ -138,13 +138,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <h3 className="text-sm font-semibold uppercase text-neutral-500">Appearance</h3>
             <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
               <span>Theme</span>
-              <button 
-                onClick={toggleTheme}
-                className="flex items-center gap-2 px-3 py-1.5 bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 rounded text-sm transition-colors"
-              >
-                {theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
-                {theme === 'dark' ? 'Dark' : 'Light'}
-              </button>
+              <div className="flex items-center gap-1">
+                 <button 
+                    title="System Theme"
+                    className={`w-8 h-8 rounded flex flex-col items-center justify-center transition-colors ${theme === 'system' ? 'bg-emerald-500 text-white' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-500 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
+                    onClick={() => toggleTheme('system')}
+                 >
+                    <div className="text-[12px] font-bold leading-none select-none">A</div>
+                 </button>
+                 <button 
+                    title="Light Theme"
+                    className={`w-8 h-8 rounded flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-emerald-500 text-white' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-500 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
+                    onClick={() => toggleTheme('light')}
+                 >
+                    <div className="w-4 h-4 rounded-full border-[3px] border-current bg-white" />
+                 </button>
+                 <button 
+                    title="Dark Theme"
+                    className={`w-8 h-8 rounded flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-emerald-500 text-white' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-500 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
+                    onClick={() => toggleTheme('dark')}
+                 >
+                    <div className="w-4 h-4 rounded-full border-[3px] border-current bg-black" />
+                 </button>
+              </div>
             </div>
           </div>
 
