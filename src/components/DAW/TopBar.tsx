@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Tone from 'tone';
 import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
@@ -11,6 +12,19 @@ export function TopBar() {
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
   const [showSettings, setShowSettings] = useState(false);
+  const [showMetronomeMenu, setShowMetronomeMenu] = useState(false);
+  const metronomeRef = React.useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+        if (metronomeRef.current && !metronomeRef.current.contains(e.target as Node)) {
+             setShowMetronomeMenu(false);
+        }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
   const [currentTime, setCurrentTime] = useState('0:00:000');
   const [bpmInput, setBpmInput] = useState(bpm.toString());
 
@@ -159,13 +173,77 @@ export function TopBar() {
           >
             <Repeat size={18} />
           </button>
-          <button 
-            className={`p-2 rounded transition-colors ${metronomeOn ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-            onClick={toggleMetronome}
-            title="Metronome"
+          <div 
+             className="relative"
+             ref={metronomeRef}
+             onContextMenu={(e) => {
+                e.preventDefault();
+                setShowMetronomeMenu(!showMetronomeMenu);
+             }}
           >
-            <Bell size={18} />
-          </button>
+            <button 
+              className={`p-2 rounded transition-colors ${metronomeOn ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+              onClick={toggleMetronome}
+              title="Metronome (Right click for settings)"
+            >
+              <Bell size={18} />
+            </button>
+            <AnimatePresence>
+              {showMetronomeMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="absolute z-50 top-full mt-2 right-0 w-64 bg-white dark:bg-neutral-800 rounded-lg shadow-xl ring-1 ring-black/5 dark:ring-white/10 p-3 space-y-3 cursor-default"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase text-neutral-500">Sound</span>
+                    <Dropdown 
+                      options={[
+                        { value: 'duck', label: 'Duck (Quack)' },
+                        { value: 'click', label: 'Click' },
+                        { value: 'woodblock', label: 'Woodblock' },
+                        { value: 'electronic', label: 'Electronic' }
+                      ]}
+                      value={useDAWStore.getState().metronomeSound}
+                      onChange={(val) => useDAWStore.getState().setMetronomeSound(val as any)}
+                      triggerClassName="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 outline-none text-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                      align="right"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase text-neutral-500">Subdivisions</span>
+                    <Dropdown 
+                      options={[
+                        { value: 1, label: 'Quarter (1x)' },
+                        { value: 2, label: 'Eighth (2x)' },
+                        { value: 4, label: 'Sixteenth (4x)' }
+                      ]}
+                      value={useDAWStore.getState().metronomeSubdivisions}
+                      onChange={(val) => useDAWStore.getState().setMetronomeSubdivisions(parseInt(val as string))}
+                      triggerClassName="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 outline-none text-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                      align="right"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs font-semibold uppercase text-neutral-500">
+                       <span>Volume</span>
+                       <span>{Math.round(useDAWStore.getState().metronomeVolume * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" max="1" step="0.01" 
+                      value={useDAWStore.getState().metronomeVolume}
+                      onChange={(e) => useDAWStore.getState().setMetronomeVolume(parseFloat(e.target.value))}
+                      className="w-full accent-emerald-500 h-1 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
         <div className="flex items-center gap-4 bg-neutral-200 dark:bg-neutral-800 rounded-md px-3 py-1.5 h-10">

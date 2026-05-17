@@ -296,7 +296,7 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
 }
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, snapGridSize, snapToGrid } = useDAWStore();
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop } = useDAWStore();
   const PIXELS_PER_BEAT = zoom; 
   const SNAP = snapToGrid ? snapGridSize : 0.015625; 
   const VISUAL_SNAP = snapGridSize;
@@ -581,15 +581,50 @@ export function ArrangeView() {
         <div 
           className="h-8 border-b border-neutral-300 dark:border-neutral-800 sticky top-0 z-10 flex text-xs text-neutral-500 overflow-visible cursor-crosshair bg-neutral-50 dark:bg-neutral-900"
           style={{ width: `${totalBeats * PIXELS_PER_BEAT}px` }}
-          onClick={(e) => {
-             const rect = e.currentTarget.getBoundingClientRect();
-             const clickX = e.clientX - rect.left + e.currentTarget.scrollLeft;
-             const beat = clickX / PIXELS_PER_BEAT;
-             if (Tone.context.state === 'running' || Tone.Transport.state !== 'stopped') {
-                Tone.Transport.position = `0:${beat}:0`;
-             }
+          onPointerDown={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const startX = e.clientX - rect.left;
+              const startBeat = Math.max(0, startX / PIXELS_PER_BEAT);
+              
+              let isDragging = false;
+
+              const onMove = (moveEvent: PointerEvent) => {
+                  isDragging = true;
+                  const currentX = moveEvent.clientX - rect.left;
+                  const currentBeat = Math.max(0, currentX / PIXELS_PER_BEAT);
+                  const minB = Math.min(startBeat, currentBeat);
+                  const maxB = Math.max(startBeat, currentBeat);
+                  const snappedMin = Math.round(minB / SNAP) * SNAP;
+                  const snappedMax = Math.max(snappedMin + SNAP, Math.round(maxB / SNAP) * SNAP);
+                  setLoopRegion(snappedMin, snappedMax);
+                  if (!isLooping) toggleLoop();
+              };
+
+              const onUp = (upEvent: PointerEvent) => {
+                  window.removeEventListener('pointermove', onMove);
+                  window.removeEventListener('pointerup', onUp);
+                  if (!isDragging) {
+                     const clickX = upEvent.clientX - rect.left;
+                     const beat = Math.max(0, clickX / PIXELS_PER_BEAT);
+                     // Set playback position
+                     const snapped = Math.round(beat / SNAP) * SNAP;
+                     Tone.Transport.position = `0:${snapped}:0`;
+                  }
+              };
+
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
           }}
         >
+          {isLooping && (
+             <div 
+                className="absolute top-0 bottom-0 bg-emerald-500/10 border-x-2 border-emerald-500 z-10 pointer-events-none"
+                style={{
+                   left: `${loopStart * PIXELS_PER_BEAT}px`,
+                   width: `${(loopEnd - loopStart) * PIXELS_PER_BEAT}px`
+                }}
+             />
+          )}
           {Array.from({ length: totalBeats / 4 }).map((_, i) => (
             <div 
               key={i} 
@@ -603,7 +638,29 @@ export function ArrangeView() {
 
         {/* Playhead indicator */}
         <div id="playhead" className="absolute top-0 bottom-0 w-px bg-emerald-500 z-30 pointer-events-none" style={{ left: '0px' }}>
-            <div className="w-3 h-3 border border-emerald-500 rounded-full absolute -top-1.5 -translate-x-[calc(50%-0.5px)] bg-neutral-100 dark:bg-neutral-900" />
+            <div 
+                className="w-4 h-4 border-2 border-emerald-500 rounded-full absolute -top-2 -translate-x-[calc(50%-0.5px)] bg-neutral-100 dark:bg-neutral-900 pointer-events-auto cursor-ew-resize hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors" 
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    const container = containerRef.current;
+                    if (!container) return;
+                    
+                    const onMove = (moveEvent: PointerEvent) => {
+                       const rect = container.getBoundingClientRect();
+                       const x = moveEvent.clientX - rect.left + container.scrollLeft;
+                       const beat = Math.max(0, x / PIXELS_PER_BEAT);
+                       const snapped = Math.round(beat / SNAP) * SNAP;
+                       Tone.Transport.position = `0:${snapped}:0`;
+                    };
+                    const onUp = (upEvent: PointerEvent) => {
+                       window.removeEventListener('pointermove', onMove);
+                       window.removeEventListener('pointerup', onUp);
+                    };
+                    window.addEventListener('pointermove', onMove);
+                    window.addEventListener('pointerup', onUp);
+                }}
+            />
         </div>
 
         {/* Track Lanes */}

@@ -5,10 +5,7 @@ import { Dropdown } from '../ui/Dropdown';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { 
-    theme, toggleTheme, getProjectData, loadProject,
-    metronomeVolume, setMetronomeVolume,
-    metronomeSound, setMetronomeSound,
-    metronomeSubdivisions, setMetronomeSubdivisions 
+    theme, toggleTheme, getProjectData, loadProject
   } = useDAWStore();
   const [githubToken, setGithubToken] = useState(localStorage.getItem('github_token') || '');
   const [githubRepo, setGithubRepo] = useState(localStorage.getItem('github_repo') || '');
@@ -170,50 +167,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* Metronome Settings */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase text-neutral-500">Metronome</h3>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
-                <span>Sound</span>
-                <Dropdown 
-                  options={[
-                    { value: 'click', label: 'Click' },
-                    { value: 'woodblock', label: 'Woodblock' },
-                    { value: 'electronic', label: 'Electronic' }
-                  ]}
-                  value={metronomeSound}
-                  onChange={(val) => setMetronomeSound(val as any)}
-                  triggerClassName="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm hover:border-emerald-500 transition-colors"
-                  align="right"
-                />
-              </div>
-              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
-                <span>Subdivisions</span>
-                <Dropdown 
-                  options={[
-                    { value: 1, label: 'Quarter Notes (1x)' },
-                    { value: 2, label: 'Eighth Notes (2x)' },
-                    { value: 4, label: 'Sixteenth Notes (4x)' }
-                  ]}
-                  value={metronomeSubdivisions}
-                  onChange={(val) => setMetronomeSubdivisions(parseInt(val as string))}
-                  triggerClassName="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm hover:border-emerald-500 transition-colors"
-                  align="right"
-                />
-              </div>
-              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
-                <span>Volume</span>
-                <input 
-                  type="range" 
-                  min="0" max="1" step="0.01" 
-                  value={metronomeVolume}
-                  onChange={(e) => setMetronomeVolume(parseFloat(e.target.value))}
-                  className="w-32 accent-emerald-500 h-1 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer"
-                />
-              </div>
-            </div>
-          </div>
+
 
           {/* Local Project Section */}
           <div className="space-y-3">
