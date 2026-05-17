@@ -62,7 +62,7 @@ interface DAWState {
   loopEnd: number;
   metronomeOn: boolean;
   metronomeVolume: number;
-  metronomeSound: 'duck' | 'click' | 'woodblock' | 'electronic';
+  metronomeSound: 'cute' | 'click' | 'woodblock' | 'electronic';
   metronomeSubdivisions: number;
   masterVolume: number;
   tracks: Track[];
@@ -93,7 +93,7 @@ interface DAWState {
   setLoopRegion: (start: number, end: number) => void;
   toggleMetronome: () => void;
   setMetronomeVolume: (volume: number) => void;
-  setMetronomeSound: (sound: 'duck' | 'click' | 'woodblock' | 'electronic') => void;
+  setMetronomeSound: (sound: 'cute' | 'click' | 'woodblock' | 'electronic') => void;
   setMetronomeSubdivisions: (subdivisions: number) => void;
   setMasterVolume: (volume: number) => void;
   toggleTheme: (mode?: ThemeMode) => void;
@@ -150,7 +150,7 @@ export const dawStore = createStore<DAWState>()(
       loopEnd: 16,
       metronomeOn: false,
       metronomeVolume: 0.8,
-      metronomeSound: 'duck',
+      metronomeSound: 'cute',
       metronomeSubdivisions: 1,
       masterVolume: 0.8,
       isRecording: false,

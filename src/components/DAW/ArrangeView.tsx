@@ -8,8 +8,9 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 const SNAP_TO_BEAT = 1; // 1 beat
 
 let currentDragContext: { id: string, duration: number, offsetX: number } | null = null;
+let currentDragTrackSourceIndex: number | null = null;
 
-function TrackHeader({ track, index, onDeletePrompt }: { track: Track, index: number, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void }) {
+function TrackHeader({ track, index, onDeletePrompt, dragTargetIndex, setDragTargetIndex }: { track: Track, index: number, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void, dragTargetIndex?: number | null, setDragTargetIndex?: (i: number | null) => void }) {
   const { updateTrack, selectTrack, selectedTrackId, deleteTrack, reorderTrack } = useDAWStore();
   const isSelected = selectedTrackId === track.id;
   const [isEditing, setIsEditing] = useState(false);
@@ -22,9 +23,18 @@ function TrackHeader({ track, index, onDeletePrompt }: { track: Track, index: nu
           e.dataTransfer.setData('text/plain', `track:${index}`);
           e.dataTransfer.setData('trackIndex', index.toString());
           e.dataTransfer.effectAllowed = 'move';
+          currentDragTrackSourceIndex = index;
       }}
       onDragOver={(e) => {
           e.preventDefault();
+          if (currentDragTrackSourceIndex !== null && setDragTargetIndex) {
+               const rect = e.currentTarget.getBoundingClientRect();
+               const isTopHalf = (e.clientY - rect.top) < (rect.height / 2);
+               setDragTargetIndex(isTopHalf ? index : index + 1);
+          }
+      }}
+      onDragLeave={(e) => {
+          // avoid clearing immediately to reduce flicker
       }}
       onDrop={(e) => {
           e.preventDefault();
@@ -41,19 +51,32 @@ function TrackHeader({ track, index, onDeletePrompt }: { track: Track, index: nu
           if (fromIndexRaw) {
               const fromIndex = parseInt(fromIndexRaw);
               const tracks = useDAWStore.getState().tracks;
-              if (!isNaN(fromIndex) && tracks[fromIndex] && tracks[index]) {
-                  reorderTrack(tracks[fromIndex].id, index);
+              const target = dragTargetIndex !== null && dragTargetIndex !== undefined ? dragTargetIndex : index;
+              if (!isNaN(fromIndex) && tracks[fromIndex]) {
+                  reorderTrack(tracks[fromIndex].id, target);
               }
           }
+          currentDragTrackSourceIndex = null;
+          if (setDragTargetIndex) setDragTargetIndex(null);
       }}
-      className={`h-24 border-b border-neutral-300 dark:border-neutral-800 flex flex-col p-2 select-none transition-colors cursor-grab active:cursor-grabbing ${isSelected ? 'bg-neutral-200 dark:bg-neutral-800' : 'bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'}`}
+      onDragEnd={(e) => {
+          currentDragTrackSourceIndex = null;
+          if (setDragTargetIndex) setDragTargetIndex(null);
+      }}
+      className={`h-24 border-b border-neutral-300 dark:border-neutral-800 flex flex-col p-2 select-none transition-colors cursor-grab active:cursor-grabbing relative ${isSelected ? 'bg-neutral-200 dark:bg-neutral-800' : 'bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'}`}
       onClick={() => selectTrack(track.id)}
     >
+      {dragTargetIndex === index && (
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-emerald-500 z-50 pointer-events-none" />
+      )}
+      {dragTargetIndex === index + 1 && index === useDAWStore.getState().tracks.length - 1 && (
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-emerald-500 z-50 pointer-events-none" />
+      )}
       <div className="flex items-center justify-between mb-2">
         {isEditing ? (
             <input 
                 autoFocus
-                className="w-full bg-transparent text-sm font-semibold outline-none text-neutral-900 dark:text-neutral-100 border-b border-emerald-500"
+                className="w-full bg-transparent text-sm font-semibold outline-none text-neutral-900 dark:text-neutral-100 border-b border-emerald-500 ml-2"
                 value={nameInput}
                 onChange={e => setNameInput(e.target.value)}
                 onBlur={() => {
@@ -66,12 +89,15 @@ function TrackHeader({ track, index, onDeletePrompt }: { track: Track, index: nu
             />
         ) : (
             <span 
-                className="text-sm font-semibold truncate text-neutral-800 dark:text-neutral-200 flex-1 cursor-text"
+                className="text-sm font-semibold truncate text-neutral-800 dark:text-neutral-200 flex-1 cursor-text flex items-center pr-2"
                 onDoubleClick={(e) => {
                     e.stopPropagation();
                     setIsEditing(true);
                 }}
             >
+                <div className="w-5 text-center mr-2 text-xs font-mono text-neutral-400 dark:text-neutral-500 flex-shrink-0">
+                    {index + 1}
+                </div>
                 {track.name}
             </span>
         )}
@@ -336,12 +362,14 @@ export function ArrangeView() {
 
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
   const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number, widthBeats?: number } | null>(null);
+  const [dragTrackDropIndex, setDragTrackDropIndex] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'track' | 'clip', id: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleDragEndGlobal = () => {
       setDragSnap(null);
+      setDragTrackDropIndex(null);
       currentDragContext = null;
     };
     window.addEventListener('dragend', handleDragEndGlobal);
@@ -362,14 +390,14 @@ export function ArrangeView() {
   const contextMenuRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-     const hideMenu = (e: MouseEvent) => {
+     const hideMenu = (e: PointerEvent) => {
          if (contextMenuRef.current && contextMenuRef.current.contains(e.target as Node)) {
              return;
          }
          setContextMenu(null);
      };
-     window.addEventListener('mousedown', hideMenu);
-     return () => window.removeEventListener('mousedown', hideMenu);
+     window.addEventListener('pointerdown', hideMenu);
+     return () => window.removeEventListener('pointerdown', hideMenu);
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -576,7 +604,7 @@ export function ArrangeView() {
             </div>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} />)}
+          {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} dragTargetIndex={dragTrackDropIndex} setDragTargetIndex={setDragTrackDropIndex} />)}
           
           <Dropdown
                options={[
@@ -584,7 +612,8 @@ export function ArrangeView() {
                  { value: 'audio', label: 'Audio Track', icon: <Mic size={14} /> }
                ]}
                onChange={(type) => addTrack(type)}
-               className="w-full"
+               className="w-full block"
+               triggerClassName="w-full"
                trigger={
                  <div className="w-full h-12 flex items-center justify-center text-neutral-500 dark:text-neutral-600 hover:text-neutral-700 dark:hover:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 border-b border-dashed border-neutral-300 dark:border-neutral-800 transition-colors cursor-pointer">
                     <Plus size={20} className="mr-2" /> Add Track
@@ -776,7 +805,13 @@ export function ArrangeView() {
         </div>
 
         {/* Track Lanes */}
-        <div className="flex flex-col min-h-max pb-32">
+        <div className="flex flex-col min-h-max pb-32 relative">
+          {dragTrackDropIndex !== null && (
+             <div 
+                 className="absolute left-0 right-0 h-[2px] bg-emerald-500 z-50 pointer-events-none"
+                 style={{ top: `${dragTrackDropIndex * 96}px` }}
+             />
+          )}
           {tracks.map(t => (
             <div 
                 key={t.id} 
@@ -828,13 +863,15 @@ export function ArrangeView() {
                 ref={contextMenuRef}
                 className="fixed bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded shadow-xl z-50 py-1 text-sm text-neutral-800 dark:text-neutral-200 min-w-32"
                 style={{ left: contextMenu.x, top: contextMenu.y }}
-                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
             >
                 {contextMenu.clipId ? (
                     <>
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
-                            onClick={() => {
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
                                 setContextMenu(null);
                                 setDeleteConfirm({ type: 'clip', id: contextMenu.clipId! });
                             }}
@@ -843,7 +880,8 @@ export function ArrangeView() {
                         </button>
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
-                            onClick={() => {
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
                                 duplicateClip(contextMenu.clipId!);
                                 setContextMenu(null);
                             }}
@@ -855,7 +893,8 @@ export function ArrangeView() {
                     <>
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
-                            onClick={() => {
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
                                 addClip(contextMenu.trackId!, contextMenu.beat!);
                                 setContextMenu(null);
                             }}

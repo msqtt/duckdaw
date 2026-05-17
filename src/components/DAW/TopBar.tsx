@@ -202,7 +202,7 @@ export function TopBar() {
                     <span className="text-xs font-semibold uppercase text-neutral-500">Sound</span>
                     <Dropdown 
                       options={[
-                        { value: 'duck', label: 'Duck (Quack)' },
+                        { value: 'cute', label: 'Cute (Boop)' },
                         { value: 'click', label: 'Click' },
                         { value: 'woodblock', label: 'Woodblock' },
                         { value: 'electronic', label: 'Electronic' }

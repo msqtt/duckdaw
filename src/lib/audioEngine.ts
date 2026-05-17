@@ -11,7 +11,7 @@ class AudioEngine {
   reverbs: Map<string, Tone.Reverb>;
   delays: Map<string, Tone.FeedbackDelay>;
   metronome: Tone.MembraneSynth | null = null;
-  duckSynth: Tone.FMSynth | null = null;
+  cuteSynth: Tone.Synth | null = null;
   metronomeLoop: Tone.Loop | null = null;
   masterMeter: Tone.Meter | null = null;
   micRecorder: MicRecorder;
@@ -60,23 +60,15 @@ class AudioEngine {
     if (!this.metronome) {
         this.metronome = new Tone.MembraneSynth({ pitchDecay: 0.008, envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 } }).toDestination();
     }
-    if (!this.duckSynth) {
-        this.duckSynth = new Tone.FMSynth({
-            harmonicity: 1.5,
-            modulationIndex: 3,
-            oscillator: { type: "square" },
-            envelope: { attack: 0.05, decay: 0.2, sustain: 0, release: 0.1 },
-            modulation: { type: "sawtooth" },
-            modulationEnvelope: { attack: 0.05, decay: 0.2, sustain: 0, release: 0.1 }
+    if (!this.cuteSynth) {
+        this.cuteSynth = new Tone.Synth({
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
-        // apply a filter to make it duck-like
-        const filter = new Tone.Filter(800, "bandpass", -24).toDestination();
-        this.duckSynth.disconnect();
-        this.duckSynth.connect(filter);
     }
 
     this.metronome.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume);
-    if (this.duckSynth) this.duckSynth.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume) + 5; // boost duck a little
+    if (this.cuteSynth) this.cuteSynth.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume) + 5; // boost slightly
 
      let subString = "4n";
      if (subdivisions === 2) subString = "8n";
@@ -97,7 +89,7 @@ class AudioEngine {
          let pitchHigh = "C4";
          let pitchLow = "C3";
          
-         let isDuck = false;
+         let isCute = false;
          
          if (sound === 'woodblock') {
              pitchHigh = "G5";
@@ -105,21 +97,21 @@ class AudioEngine {
          } else if (sound === 'electronic') {
              pitchHigh = "C6";
              pitchLow = "C5";
-         } else if (sound === 'duck') {
-             pitchHigh = "F3"; // higher duck
-             pitchLow = "C3";  // lower duck
-             isDuck = true;
+         } else if (sound === 'cute') {
+             pitchHigh = "E6"; // higher cute pop
+             pitchLow = "A5";  // lower cute pop
+             isCute = true;
          }
 
          if (highClick) {
-            if (isDuck) {
-                this.duckSynth?.triggerAttackRelease(pitchHigh, "16n", time, 1);
+            if (isCute) {
+                this.cuteSynth?.triggerAttackRelease(pitchHigh, "32n", time, 1);
             } else {
                 this.metronome?.triggerAttackRelease(pitchHigh, "32n", time, 1);
             }
          } else {
-            if (isDuck) {
-                this.duckSynth?.triggerAttackRelease(pitchLow, "16n", time, 0.5);
+            if (isCute) {
+                this.cuteSynth?.triggerAttackRelease(pitchLow, "32n", time, 0.5);
             } else {
                 this.metronome?.triggerAttackRelease(pitchLow, "32n", time, 0.5);
             }
