@@ -3,12 +3,13 @@ import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic } from 'l
 import React, { useRef, useState, useEffect } from 'react';
 import * as Tone from 'tone';
 import { Dropdown } from '../ui/Dropdown';
+import { ConfirmModal } from '../ui/ConfirmModal';
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
 let currentDragContext: { id: string, duration: number, offsetX: number } | null = null;
 
-function TrackHeader({ track, index }: { track: Track, index: number, key?: React.Key }) {
+function TrackHeader({ track, index, onDeletePrompt }: { track: Track, index: number, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void }) {
   const { updateTrack, selectTrack, selectedTrackId, deleteTrack, reorderTrack } = useDAWStore();
   const isSelected = selectedTrackId === track.id;
   const [isEditing, setIsEditing] = useState(false);
@@ -18,17 +19,31 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
     <div 
       draggable={!isEditing}
       onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', `track:${index}`);
           e.dataTransfer.setData('trackIndex', index.toString());
           e.dataTransfer.effectAllowed = 'move';
       }}
       onDragOver={(e) => {
-          if (e.dataTransfer.types.includes('trackIndex')) e.preventDefault();
+          e.preventDefault();
       }}
       onDrop={(e) => {
-          const fromIndex = e.dataTransfer.getData('trackIndex');
-          if (fromIndex) {
-              e.preventDefault();
-              reorderTrack(useDAWStore.getState().tracks[parseInt(fromIndex)].id, index);
+          e.preventDefault();
+          e.stopPropagation();
+          let fromIndexRaw = e.dataTransfer.getData('trackIndex') || e.dataTransfer.getData('trackindex');
+          
+          if (!fromIndexRaw) {
+              const textPlain = e.dataTransfer.getData('text/plain');
+              if (textPlain && textPlain.startsWith('track:')) {
+                  fromIndexRaw = textPlain.split(':')[1];
+              }
+          }
+
+          if (fromIndexRaw) {
+              const fromIndex = parseInt(fromIndexRaw);
+              const tracks = useDAWStore.getState().tracks;
+              if (!isNaN(fromIndex) && tracks[fromIndex] && tracks[index]) {
+                  reorderTrack(tracks[fromIndex].id, index);
+              }
           }
       }}
       className={`h-24 border-b border-neutral-300 dark:border-neutral-800 flex flex-col p-2 select-none transition-colors cursor-grab active:cursor-grabbing ${isSelected ? 'bg-neutral-200 dark:bg-neutral-800' : 'bg-neutral-50 dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'}`}
@@ -81,7 +96,11 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
           </button>
           <button 
             className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-red-500 hover:text-white transition-colors"
-            onClick={(e) => { e.stopPropagation(); deleteTrack(track.id); }}
+            onClick={(e) => { 
+                e.stopPropagation(); 
+                if (onDeletePrompt) onDeletePrompt('track', track.id);
+                else deleteTrack(track.id); 
+            }}
             title="Delete Track"
           >
             <Trash2 size={12} />
@@ -90,11 +109,7 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
       </div>
       
       <div 
-        draggable
-        onDragStart={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        }}
+        onPointerDown={(e) => e.stopPropagation()}
         className="flex items-center gap-2 mt-auto"
       >
         <Volume2 size={14} className="text-neutral-500" />
@@ -110,7 +125,7 @@ function TrackHeader({ track, index }: { track: Track, index: number, key?: Reac
   );
 }
 
-function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key }) {
+function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void }) {
   const { selectClip, selectedClipIds, updateClip, duplicateClip, deleteClip, zoom, snapToGrid, snapGridSize } = useDAWStore();
   const isSelected = selectedClipIds.includes(clip.id);
   const PIXELS_PER_BEAT = zoom;
@@ -194,7 +209,11 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
             )}
             {!isEditing && (
                 <button 
-                    onClick={(e) => { e.stopPropagation(); deleteClip(clip.id); }}
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        if (onDeletePrompt) onDeletePrompt('clip', clip.id);
+                        else deleteClip(clip.id); 
+                    }}
                     className="opacity-0 group-hover:opacity-100 hover:text-white transition-opacity ml-1"
                 >
                     <Trash2 size={12} />
@@ -317,6 +336,7 @@ export function ArrangeView() {
 
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
   const [dragSnap, setDragSnap] = useState<{ trackId: string, beat: number, widthBeats?: number } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'track' | 'clip', id: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -339,10 +359,17 @@ export function ArrangeView() {
 
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, trackId?: string, beat?: number, clipId?: string } | null>(null);
 
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
-     const hideMenu = () => setContextMenu(null);
-     window.addEventListener('click', hideMenu);
-     return () => window.removeEventListener('click', hideMenu);
+     const hideMenu = (e: MouseEvent) => {
+         if (contextMenuRef.current && contextMenuRef.current.contains(e.target as Node)) {
+             return;
+         }
+         setContextMenu(null);
+     };
+     window.addEventListener('mousedown', hideMenu);
+     return () => window.removeEventListener('mousedown', hideMenu);
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -469,7 +496,7 @@ export function ArrangeView() {
       const clipId = e.dataTransfer.getData('text/plain');
       const offsetXStr = e.dataTransfer.getData('offsetX');
       const action = e.dataTransfer.getData('action');
-      if (!clipId) return;
+      if (!clipId || clipId.startsWith('track:')) return;
 
       const offsetX = offsetXStr ? parseFloat(offsetXStr) : 0;
       const startX = Math.max(0, dropX - offsetX);
@@ -516,7 +543,18 @@ export function ArrangeView() {
   }, [PIXELS_PER_BEAT]);
 
   return (
-    <div className="flex flex-1 overflow-hidden bg-neutral-50 dark:bg-neutral-900 relative">
+    <>
+      <ConfirmModal 
+         isOpen={deleteConfirm !== null}
+         onClose={() => setDeleteConfirm(null)}
+         title={deleteConfirm?.type === 'track' ? "Delete Track" : "Delete Clip"}
+         message={`Are you sure you want to delete this ${deleteConfirm?.type}? This action cannot be undone.`}
+         onConfirm={() => {
+             if (deleteConfirm?.type === 'track') deleteTrack(deleteConfirm.id);
+             else if (deleteConfirm?.type === 'clip') deleteClip(deleteConfirm.id);
+         }}
+      />
+      <div className="flex flex-1 overflow-hidden bg-neutral-50 dark:bg-neutral-900 relative">
       {/* Track Headers Sidebar */}
       <div className="w-64 flex-shrink-0 bg-neutral-50 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col z-20">
         <div className="h-8 border-b border-neutral-300 dark:border-neutral-800 bg-neutral-200 dark:bg-neutral-800/50 flex items-center px-4 justify-between">
@@ -538,7 +576,7 @@ export function ArrangeView() {
             </div>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} />)}
+          {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} />)}
           
           <Dropdown
                options={[
@@ -618,12 +656,86 @@ export function ArrangeView() {
         >
           {isLooping && (
              <div 
-                className="absolute top-0 bottom-0 bg-emerald-500/10 border-x-2 border-emerald-500 z-10 pointer-events-none"
+                className="absolute top-0 bottom-0 pointer-events-none z-20"
                 style={{
                    left: `${loopStart * PIXELS_PER_BEAT}px`,
                    width: `${(loopEnd - loopStart) * PIXELS_PER_BEAT}px`
                 }}
-             />
+             >
+                <div 
+                    className="absolute inset-x-3 inset-y-0 bg-emerald-500/10 pointer-events-auto cursor-grab active:cursor-grabbing hover:bg-emerald-500/20 transition-colors" 
+                    onPointerDown={(e) => {
+                       e.stopPropagation();
+                       e.currentTarget.setPointerCapture(e.pointerId);
+                       const rect = e.currentTarget.parentElement!.parentElement!.getBoundingClientRect();
+                       const loopWidthBeats = loopEnd - loopStart;
+                       const startX = e.clientX;
+                       const initialLoopStart = loopStart;
+                       
+                       const onMove = (moveEvent: PointerEvent) => {
+                           const deltaX = moveEvent.clientX - startX;
+                           const deltaBeat = deltaX / PIXELS_PER_BEAT;
+                           const newStartBeat = Math.max(0, initialLoopStart + deltaBeat);
+                           const snappedMin = Math.round(newStartBeat / SNAP) * SNAP;
+                           setLoopRegion(snappedMin, snappedMin + loopWidthBeats);
+                       };
+                       const onUp = () => {
+                           window.removeEventListener('pointermove', onMove);
+                           window.removeEventListener('pointerup', onUp);
+                       };
+                       window.addEventListener('pointermove', onMove);
+                       window.addEventListener('pointerup', onUp);
+                    }}
+                />
+                <div className="absolute inset-y-0 left-0 w-px bg-emerald-500" />
+                <div className="absolute inset-y-0 right-0 w-px bg-emerald-500" />
+                
+                <div 
+                   className="absolute left-0 top-0 bottom-0 w-3 -translate-x-[1.5px] pointer-events-auto cursor-ew-resize hover:bg-emerald-500 hover:opacity-50 transition-colors"
+                   onPointerDown={(e) => {
+                       e.stopPropagation();
+                       e.currentTarget.setPointerCapture(e.pointerId);
+                       const rect = e.currentTarget.parentElement!.parentElement!.getBoundingClientRect();
+                       const onMove = (moveEvent: PointerEvent) => {
+                           const currentX = moveEvent.clientX - rect.left;
+                           const currentBeat = Math.max(0, currentX / PIXELS_PER_BEAT);
+                           const snappedMin = Math.round(currentBeat / SNAP) * SNAP;
+                           if (snappedMin < loopEnd) {
+                              setLoopRegion(snappedMin, loopEnd);
+                           }
+                       };
+                       const onUp = () => {
+                           window.removeEventListener('pointermove', onMove);
+                           window.removeEventListener('pointerup', onUp);
+                       };
+                       window.addEventListener('pointermove', onMove);
+                       window.addEventListener('pointerup', onUp);
+                   }}
+                />
+                
+                <div 
+                   className="absolute right-0 top-0 bottom-0 w-3 translate-x-[1.5px] pointer-events-auto cursor-ew-resize hover:bg-emerald-500 hover:opacity-50 transition-colors"
+                   onPointerDown={(e) => {
+                       e.stopPropagation();
+                       e.currentTarget.setPointerCapture(e.pointerId);
+                       const rect = e.currentTarget.parentElement!.parentElement!.getBoundingClientRect();
+                       const onMove = (moveEvent: PointerEvent) => {
+                           const currentX = moveEvent.clientX - rect.left;
+                           const currentBeat = Math.max(0, currentX / PIXELS_PER_BEAT);
+                           const snappedMax = Math.round(currentBeat / SNAP) * SNAP;
+                           if (snappedMax > loopStart) {
+                              setLoopRegion(loopStart, snappedMax);
+                           }
+                       };
+                       const onUp = () => {
+                           window.removeEventListener('pointermove', onMove);
+                           window.removeEventListener('pointerup', onUp);
+                       };
+                       window.addEventListener('pointermove', onMove);
+                       window.addEventListener('pointerup', onUp);
+                   }}
+                />
+             </div>
           )}
           {Array.from({ length: totalBeats / 4 }).map((_, i) => (
             <div 
@@ -697,6 +809,7 @@ export function ArrangeView() {
                         key={c.id} 
                         clip={c} 
                         trackColor={t.color} 
+                        onDeletePrompt={(type, id) => setDeleteConfirm({ type, id })}
                         onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -712,6 +825,7 @@ export function ArrangeView() {
         {/* Context Menu */}
         {contextMenu && (
             <div 
+                ref={contextMenuRef}
                 className="fixed bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded shadow-xl z-50 py-1 text-sm text-neutral-800 dark:text-neutral-200 min-w-32"
                 style={{ left: contextMenu.x, top: contextMenu.y }}
                 onClick={(e) => e.stopPropagation()}
@@ -721,8 +835,8 @@ export function ArrangeView() {
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
                             onClick={() => {
-                                deleteClip(contextMenu.clipId!);
                                 setContextMenu(null);
+                                setDeleteConfirm({ type: 'clip', id: contextMenu.clipId! });
                             }}
                         >
                             Delete
@@ -766,5 +880,6 @@ export function ArrangeView() {
         </div>
       </div>
     </div>
+    </>
   );
 }
