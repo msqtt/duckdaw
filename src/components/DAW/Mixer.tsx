@@ -47,7 +47,29 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2">
-        <div className="flex-1 flex justify-center w-full relative">
+        <div className="flex flex-col w-full px-1 gap-1 mb-2">
+          {/* FX Sends */}
+          <div className="flex justify-between items-center text-[9px] text-emerald-600">
+             <span>REV</span>
+             <input type="range" min="0" max="1" step="0.05" value={track.reverb || 0} onChange={(e) => updateTrack(track.id, { reverb: parseFloat(e.target.value) })} className="w-12 h-1 accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" />
+          </div>
+          <div className="flex justify-between items-center text-[9px] text-blue-500 mb-2">
+             <span>DLY</span>
+             <input type="range" min="0" max="1" step="0.05" value={track.delay || 0} onChange={(e) => updateTrack(track.id, { delay: parseFloat(e.target.value) })} className="w-12 h-1 accent-blue-500 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" />
+          </div>
+          
+          {/* Synth Env */}
+          {track.type === 'midi' && track.env && (
+             <div className="grid grid-cols-2 gap-x-1 gap-y-1 bg-black/10 dark:bg-black/30 p-1 rounded">
+                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">A</span><input type="range" min="0.001" max="2" step="0.01" value={track.env.attack} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, attack: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
+                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">D</span><input type="range" min="0.01" max="2" step="0.01" value={track.env.decay} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, decay: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
+                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">S</span><input type="range" min="0" max="1" step="0.01" value={track.env.sustain} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, sustain: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
+                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">R</span><input type="range" min="0.01" max="5" step="0.01" value={track.env.release} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, release: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
+             </div>
+          )}
+        </div>
+        
+        <div className="flex-1 flex justify-center w-full relative min-h-[100px]">
             {/* Meter */}
             <div className="w-1.5 h-full bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
                <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />

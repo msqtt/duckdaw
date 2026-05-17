@@ -92,35 +92,44 @@ export function ExportModal() {
     try {
         const renderDuration = Math.max(1, totalDurationSeconds);
 
-        const renderedToneBuffer = await Tone.Offline(async () => {
+        const renderedToneBuffer = await Tone.Offline(async ({ context }) => {
              Tone.Transport.bpm.value = bpm;
              Tone.getContext().lookAhead = 0;
 
              const synths = new Map();
              const channels = new Map();
+             const players = new Map();
+             
              for (const track of tracks) {
                  const channel = new Tone.Channel().toDestination();
                  channel.volume.value = track.volume === 0 ? -Infinity : 20 * Math.log10(track.volume);
                  channel.pan.value = track.pan;
                  channel.mute = track.isMuted;
                  channel.solo = track.isSolo;
+                 
+                 const reverb = new Tone.Reverb(2);
+                 const delay = new Tone.FeedbackDelay("8n", 0.3);
+                 reverb.wet.value = track.reverb || 0;
+                 delay.wet.value = track.delay || 0;
+                 channel.chain(delay, reverb, context.destination);
+                 
                  channels.set(track.id, channel);
 
                  if (track.type === 'midi') {
                      let synth;
                      switch(track.instrument) {
                         case 'piano':
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.02, decay: 1, sustain: 0.4, release: 1 } });
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: track.env || { attack: 0.02, decay: 1, sustain: 0.4, release: 1 } });
                             break;
                         case 'bass':
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 } });
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: track.env || { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 } });
                             break;
                         case 'drum':
                             synth = new Tone.PolySynth(Tone.MembraneSynth);
                             break;
                         case 'synth':
                         default:
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } });
+                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'square' }, envelope: track.env || { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } });
                             break;
                      }
                      synth.connect(channel);
@@ -129,17 +138,38 @@ export function ExportModal() {
              }
 
              const beatTime = 60 / bpm;
+             
+             // Pre-load audio buffers for audio tracks
+             const audioClips = clips.filter(c => c.type === 'audio' && c.bufferUrl);
+             for (const clip of audioClips) {
+                 const channel = channels.get(clip.trackId);
+                 if (channel) {
+                     const player = new Tone.Player({ url: clip.bufferUrl! });
+                     await player.load(clip.bufferUrl!);
+                     player.connect(channel);
+                     players.set(clip.id, player);
+                 }
+             }
+
              for (const clip of clips) {
+                 const absoluteStartBeat = clip.start;
+                 const startTimeSeconds = absoluteStartBeat * beatTime;
+                 
                  if (clip.type === 'midi' && clip.notes) {
                      const synth = synths.get(clip.trackId);
                      if (!synth) continue;
                      
                      clip.notes.forEach(note => {
-                         const absoluteStartBeat = clip.start + note.start;
-                         const startTimeSeconds = absoluteStartBeat * beatTime;
+                         const absoluteNoteStartBeat = clip.start + note.start;
+                         const noteStartTimeSeconds = absoluteNoteStartBeat * beatTime;
                          const durationSeconds = note.duration * beatTime;
-                         synth.triggerAttackRelease(note.note, durationSeconds, startTimeSeconds, note.velocity);
+                         synth.triggerAttackRelease(note.note, durationSeconds, noteStartTimeSeconds, note.velocity);
                      });
+                 } else if (clip.type === 'audio' && clip.bufferUrl) {
+                     const player = players.get(clip.id);
+                     if (player) {
+                         player.start(startTimeSeconds);
+                     }
                  }
              }
              

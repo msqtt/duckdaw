@@ -1,4 +1,6 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { useStore } from 'zustand';
+import { temporal } from 'zundo';
 
 export type TrackType = 'midi' | 'audio';
 export type InstrumentType = 'piano' | 'synth' | 'bass' | 'drum';
@@ -25,6 +27,13 @@ export interface Clip {
   color?: string; // override track color
 }
 
+export interface EnvConfig {
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+}
+
 export interface Track {
   id: string;
   name: string;
@@ -35,6 +44,10 @@ export interface Track {
   isSolo: boolean;
   instrument?: InstrumentType; // for midi
   color: string;
+  // new FX and synth props
+  reverb: number; // 0-1 send
+  delay: number; // 0-1 send
+  env?: EnvConfig;
 }
 
 interface DAWState {
@@ -42,6 +55,10 @@ interface DAWState {
   timeSignature: [number, number];
   theme: ThemeMode;
   isPlaying: boolean;
+  isLooping: boolean;
+  loopStart: number;
+  loopEnd: number;
+  metronomeOn: boolean;
   tracks: Track[];
   clips: Clip[];
   selectedTrackId: string | null;
@@ -63,6 +80,9 @@ interface DAWState {
   setZoom: (zoom: number) => void;
   togglePlay: () => void;
   stop: () => void;
+  toggleLoop: () => void;
+  setLoopRegion: (start: number, end: number) => void;
+  toggleMetronome: () => void;
   toggleTheme: (mode?: ThemeMode) => void;
   setBottomPanel: (panel: BottomPanel) => void;
   setPanelHeight: (height: number) => void;
@@ -73,7 +93,7 @@ interface DAWState {
   addTrack: (type: TrackType) => void;
   deleteTrack: (id: string) => void;
   reorderTrack: (id: string, index: number) => void;
-  addClip: (trackId: string, start: number) => void;
+  addClip: (trackId: string, start: number, bufferUrl?: string) => void;
   duplicateClip: (clipId: string) => void;
   deleteClip: (clipId: string) => void;
   selectTrack: (id: string | null) => void;
@@ -95,267 +115,309 @@ const getRandomColor = () => {
     return colors[Math.floor(Math.random() * colors.length)];
 };
 
-export const useDAWStore = create<DAWState>((set, get) => ({
-  bpm: 120,
-  timeSignature: [4, 4],
-  zoom: 20,
-  bottomPanel: null,
-  panelHeight: 300,
-  panelFullScreen: false,
-  exportModalOpen: false,
-  lastNoteDuration: 0.5,
-  theme: 'dark',
-  isPlaying: false,
-  isRecording: false,
-  selectedClipIds: ['clip-1'],
-  selectedNoteIds: [],
-  clipboardClips: [],
-  clipboardNotes: [],
-  tracks: [
-    {
-      id: 'track-1',
-      name: 'Synth Melody',
-      type: 'midi',
-      volume: 0.8,
-      pan: 0,
-      isMuted: false,
-      isSolo: false,
-      instrument: 'synth',
-      color: '#0ea5e9' // sky-500
-    },
-    {
-      id: 'track-2',
-      name: 'Bass',
-      type: 'midi',
-      volume: 0.9,
-      pan: 0,
-      isMuted: false,
-      isSolo: false,
-      instrument: 'bass',
-      color: '#ef4444' // red-500
-    },
-    {
-      id: 'track-3',
-      name: 'Drums',
-      type: 'midi',
-      volume: 1.0,
-      pan: 0,
-      isMuted: false,
-      isSolo: false,
-      instrument: 'drum',
-      color: '#f59e0b' // amber-500
-    }
-  ],
-  clips: [
-    {
-      id: 'clip-1',
-      trackId: 'track-1',
-      start: 0,
-      duration: 16, // 4 bars = 16 beats
-      type: 'midi',
-      color: '#0ea5e9',
-      notes: [
-        { id: 'n1', note: 'C4', start: 0, duration: 1, velocity: 0.8 },
-        { id: 'n2', note: 'E4', start: 1, duration: 1, velocity: 0.8 },
-        { id: 'n3', note: 'G4', start: 2, duration: 1, velocity: 0.8 },
-        { id: 'n4', note: 'B4', start: 3, duration: 1, velocity: 0.8 },
-        { id: 'n5', note: 'A4', start: 4, duration: 1, velocity: 0.8 },
-        { id: 'n6', note: 'C5', start: 5, duration: 1, velocity: 0.8 },
-        { id: 'n7', note: 'F4', start: 6, duration: 2, velocity: 0.8 },
-      ]
-    },
-    {
-      id: 'clip-2',
-      trackId: 'track-2',
-      start: 0,
-      duration: 16,
-      type: 'midi',
-      color: '#ef4444',
-      notes: [
-        { id: 'b1', note: 'C2', start: 0, duration: 4, velocity: 1.0 },
-        { id: 'b2', note: 'A1', start: 4, duration: 2, velocity: 1.0 },
-        { id: 'b3', note: 'F1', start: 6, duration: 2, velocity: 1.0 },
-      ]
-    },
-    {
-      id: 'clip-3',
-      trackId: 'track-3',
-      start: 0,
-      duration: 16,
-      type: 'midi',
-      color: '#f59e0b',
-      notes: [
-        // Basic beat simulation using notes
-        { id: 'd1', note: 'C2', start: 0, duration: 0.5, velocity: 1 }, // Kick
-        { id: 'd2', note: 'D2', start: 1, duration: 0.5, velocity: 1 }, // Snare
-        { id: 'd3', note: 'C2', start: 2, duration: 0.5, velocity: 1 }, // Kick
-        { id: 'd4', note: 'C2', start: 2.5, duration: 0.5, velocity: 1 }, // Kick
-        { id: 'd5', note: 'D2', start: 3, duration: 0.5, velocity: 1 }, // Snare
-        { id: 'd6', note: 'C2', start: 4, duration: 0.5, velocity: 1 },
-        { id: 'd7', note: 'D2', start: 5, duration: 0.5, velocity: 1 },
-        { id: 'd8', note: 'C2', start: 6, duration: 0.5, velocity: 1 },
-        { id: 'd9', note: 'D2', start: 7, duration: 0.5, velocity: 1 },
-      ]
-    }
-  ],
-  selectedTrackId: 'track-1',
+export const dawStore = createStore<DAWState>()(
+  temporal(
+    (set, get) => ({
+      bpm: 120,
+      timeSignature: [4, 4],
+      zoom: 20,
+      bottomPanel: null,
+      panelHeight: 300,
+      panelFullScreen: false,
+      exportModalOpen: false,
+      lastNoteDuration: 0.5,
+      theme: 'dark',
+      isPlaying: false,
+      isLooping: false,
+      loopStart: 0,
+      loopEnd: 16,
+      metronomeOn: false,
+      isRecording: false,
+      selectedClipIds: ['clip-1'],
+      selectedNoteIds: [],
+      clipboardClips: [],
+      clipboardNotes: [],
+      tracks: [
+        {
+          id: 'track-1',
+          name: 'Synth Melody',
+          type: 'midi',
+          volume: 0.8,
+          pan: 0,
+          isMuted: false,
+          isSolo: false,
+          instrument: 'synth',
+          color: '#0ea5e9', // sky-500
+          reverb: 0.2,
+          delay: 0,
+          env: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 }
+        },
+        {
+          id: 'track-2',
+          name: 'Bass',
+          type: 'midi',
+          volume: 0.9,
+          pan: 0,
+          isMuted: false,
+          isSolo: false,
+          instrument: 'bass',
+          color: '#ef4444', // red-500
+          reverb: 0,
+          delay: 0,
+          env: { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 }
+        },
+        {
+          id: 'track-3',
+          name: 'Drums',
+          type: 'midi',
+          volume: 1.0,
+          pan: 0,
+          isMuted: false,
+          isSolo: false,
+          instrument: 'drum',
+          color: '#f59e0b', // amber-500
+          reverb: 0.1,
+          delay: 0
+        }
+      ],
+      clips: [
+        {
+          id: 'clip-1',
+          trackId: 'track-1',
+          start: 0,
+          duration: 16,
+          type: 'midi',
+          color: '#0ea5e9',
+          notes: [
+            { id: 'n1', note: 'C4', start: 0, duration: 1, velocity: 0.8 },
+            { id: 'n2', note: 'E4', start: 1, duration: 1, velocity: 0.8 },
+            { id: 'n3', note: 'G4', start: 2, duration: 1, velocity: 0.8 },
+            { id: 'n4', note: 'B4', start: 3, duration: 1, velocity: 0.8 },
+            { id: 'n5', note: 'A4', start: 4, duration: 1, velocity: 0.8 },
+            { id: 'n6', note: 'C5', start: 5, duration: 1, velocity: 0.8 },
+            { id: 'n7', note: 'F4', start: 6, duration: 2, velocity: 0.8 },
+          ]
+        },
+        {
+          id: 'clip-2',
+          trackId: 'track-2',
+          start: 0,
+          duration: 16,
+          type: 'midi',
+          color: '#ef4444',
+          notes: [
+            { id: 'b1', note: 'C2', start: 0, duration: 4, velocity: 1.0 },
+            { id: 'b2', note: 'A1', start: 4, duration: 2, velocity: 1.0 },
+            { id: 'b3', note: 'F1', start: 6, duration: 2, velocity: 1.0 },
+          ]
+        },
+        {
+          id: 'clip-3',
+          trackId: 'track-3',
+          start: 0,
+          duration: 16,
+          type: 'midi',
+          color: '#f59e0b',
+          notes: [
+            { id: 'd1', note: 'C2', start: 0, duration: 0.5, velocity: 1 },
+            { id: 'd2', note: 'D2', start: 1, duration: 0.5, velocity: 1 },
+            { id: 'd3', note: 'C2', start: 2, duration: 0.5, velocity: 1 },
+            { id: 'd4', note: 'C2', start: 2.5, duration: 0.5, velocity: 1 },
+            { id: 'd5', note: 'D2', start: 3, duration: 0.5, velocity: 1 },
+            { id: 'd6', note: 'C2', start: 4, duration: 0.5, velocity: 1 },
+            { id: 'd7', note: 'D2', start: 5, duration: 0.5, velocity: 1 },
+            { id: 'd8', note: 'C2', start: 6, duration: 0.5, velocity: 1 },
+            { id: 'd9', note: 'D2', start: 7, duration: 0.5, velocity: 1 },
+          ]
+        }
+      ],
+      selectedTrackId: 'track-1',
 
-  setBpm: (bpm) => set({ bpm }),
-  setTimeSignature: (ts: [number, number]) => set({ timeSignature: ts }),
-  setZoom: (zoom: number) => set({ zoom }),
-  setBottomPanel: (panel: BottomPanel) => set({ bottomPanel: panel }),
-  setPanelHeight: (height: number) => set({ panelHeight: height }),
-  setPanelFullScreen: (fs: boolean) => set({ panelFullScreen: fs }),
-  setExportModalOpen: (open: boolean) => set({ exportModalOpen: open }),
-  setLastNoteDuration: (duration: number) => set({ lastNoteDuration: duration }),
-  toggleTheme: (mode?: ThemeMode) => set((state) => {
-    let newTheme = mode;
-    if (!newTheme) {
-      if (state.theme === 'system') newTheme = 'dark';
-      else if (state.theme === 'dark') newTheme = 'light';
-      else newTheme = 'system';
-    }
-    
-    // Apply theme
-    const root = document.documentElement;
-    root.classList.remove('dark', 'light');
-    if (newTheme === 'system') {
-      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        root.classList.add('dark');
-      }
-    } else if (newTheme === 'dark') {
-      root.classList.add('dark');
-    }
-    
-    return { theme: newTheme! };
-  }),
-  loadProject: (data) => set((state) => ({
-    ...state,
-    bpm: data.bpm || state.bpm,
-    tracks: data.tracks || state.tracks,
-    clips: data.clips || state.clips,
-    isPlaying: false,
-    selectedTrackId: null,
-    selectedClipIds: [],
-    exportModalOpen: false,
-  })),
-  getProjectData: () => {
-    const state = get();
-    return { bpm: state.bpm, tracks: state.tracks, clips: state.clips };
-  },
-  togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-  stop: () => set({ isPlaying: false, isRecording: false }),
-  addTrack: (type) => set((state) => {
-    const newTrack: Track = {
-      id: generateId(),
-      name: `${type === 'midi' ? 'Inst' : 'Audio'} ${state.tracks.length + 1}`,
-      type,
-      volume: 0.8,
-      pan: 0,
-      isMuted: false,
-      isSolo: false,
-      instrument: type === 'midi' ? 'synth' : undefined,
-      color: getRandomColor()
-    };
-    return { tracks: [...state.tracks, newTrack], selectedTrackId: newTrack.id };
-  }),
-  deleteTrack: (id) => set((state) => ({
-      tracks: state.tracks.filter(t => t.id !== id),
-      clips: state.clips.filter(c => c.trackId !== id),
-      selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
-      selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id)
-  })),
-  reorderTrack: (id, index) => set((state) => {
-    const track = state.tracks.find(t => t.id === id);
-    if (!track) return state;
-    const newTracks = state.tracks.filter(t => t.id !== id);
-    newTracks.splice(index, 0, track);
-    return { tracks: newTracks };
-  }),
-  addClip: (trackId, start) => set((state) => {
-    const track = state.tracks.find(t => t.id === trackId);
-    if (!track) return state;
-    const newClip: Clip = {
-      id: generateId(),
-      trackId,
-      start,
-      duration: 16,
-      type: track.type,
-      notes: [],
-      color: track.color
-    };
-    return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
-  }),
-  duplicateClip: (clipId) => set((state) => {
-    const clip = state.clips.find(c => c.id === clipId);
-    if (!clip) return state;
-    const newClip: Clip = {
-      ...clip,
-      id: generateId(),
-      start: clip.start + clip.duration
-    };
-    // Deep clone notes
-    if (clip.notes) {
-      newClip.notes = clip.notes.map(n => ({ ...n, id: generateId() }));
-    }
-    return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
-  }),
-  deleteClip: (clipId) => set((state) => ({
-      clips: state.clips.filter(c => c.id !== clipId),
-      selectedClipIds: state.selectedClipIds.filter(id => id !== clipId)
-  })),
-  selectTrack: (id) => set({ selectedTrackId: id }),
-  selectClip: (id, multi = false) => set((state) => {
-    if (!id) return { selectedClipIds: [] };
-    if (multi) {
-      if (state.selectedClipIds.includes(id)) {
-        return { selectedClipIds: state.selectedClipIds.filter(c => c !== id) };
-      }
-      return { selectedClipIds: [...state.selectedClipIds, id] };
-    }
-    return { selectedClipIds: [id] };
-  }),
-  selectNote: (id, multi = false) => set((state) => {
-    if (!id) return { selectedNoteIds: [] };
-    if (multi) {
-      if (state.selectedNoteIds.includes(id)) {
-        return { selectedNoteIds: state.selectedNoteIds.filter(n => n !== id) };
-      }
-      return { selectedNoteIds: [...state.selectedNoteIds, id] };
-    }
-    return { selectedNoteIds: [id] };
-  }),
-  setClipboard: (type, items) => set((state) => {
-     if (type === 'clips') return { clipboardClips: items, clipboardNotes: [] };
-     return { clipboardNotes: items, clipboardClips: [] };
-  }),
-  updateTrack: (id, updates) => set((state) => ({
-    tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t)
-  })),
-  updateClip: (id, updates) => set((state) => ({
-    clips: state.clips.map(c => c.id === id ? { ...c, ...updates } : c)
-  })),
-  addNote: (clipId, note) => set((state) => ({
-    clips: state.clips.map(c => c.id === clipId ? { ...c, notes: [...(c.notes || []), note] } : c)
-  })),
-  updateNote: (clipId, noteId, updates) => set((state) => ({
-    clips: state.clips.map(c => {
-      if (c.id === clipId) {
-        return {
-          ...c,
-          notes: c.notes?.map(n => n.id === noteId ? { ...n, ...updates } : n)
+      setBpm: (bpm) => set({ bpm }),
+      setTimeSignature: (ts) => set({ timeSignature: ts }),
+      setZoom: (zoom) => set({ zoom }),
+      setBottomPanel: (panel) => set({ bottomPanel: panel }),
+      setPanelHeight: (height) => set({ panelHeight: height }),
+      setPanelFullScreen: (fs) => set({ panelFullScreen: fs }),
+      setExportModalOpen: (open) => set({ exportModalOpen: open }),
+      setLastNoteDuration: (duration) => set({ lastNoteDuration: duration }),
+      toggleLoop: () => set((state) => ({ isLooping: !state.isLooping })),
+      setLoopRegion: (start, end) => set({ loopStart: start, loopEnd: end }),
+      toggleMetronome: () => set((state) => ({ metronomeOn: !state.metronomeOn })),
+      toggleTheme: (mode) => set((state) => {
+        let newTheme = mode;
+        if (!newTheme) {
+          if (state.theme === 'system') newTheme = 'dark';
+          else if (state.theme === 'dark') newTheme = 'light';
+          else newTheme = 'system';
+        }
+        
+        const root = document.documentElement;
+        root.classList.remove('dark', 'light');
+        if (newTheme === 'system') {
+          if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            root.classList.add('dark');
+          }
+        } else if (newTheme === 'dark') {
+          root.classList.add('dark');
+        }
+        
+        return { theme: newTheme! };
+      }),
+      loadProject: (data) => set((state) => ({
+        ...state,
+        bpm: data.bpm || state.bpm,
+        tracks: data.tracks || state.tracks,
+        clips: data.clips || state.clips,
+        isPlaying: false,
+        selectedTrackId: null,
+        selectedClipIds: [],
+        exportModalOpen: false,
+      })),
+      getProjectData: () => {
+        const state = get();
+        return { bpm: state.bpm, tracks: state.tracks, clips: state.clips };
+      },
+      togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
+      stop: () => set({ isPlaying: false, isRecording: false }),
+      addTrack: (type) => set((state) => {
+        const newTrack: Track = {
+          id: generateId(),
+          name: `${type === 'midi' ? 'Inst' : 'Audio'} ${state.tracks.length + 1}`,
+          type,
+          volume: 0.8,
+          pan: 0,
+          isMuted: false,
+          isSolo: false,
+          instrument: type === 'midi' ? 'synth' : undefined,
+          color: getRandomColor(),
+          reverb: 0,
+          delay: 0,
+          env: type === 'midi' ? { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } : undefined
         };
-      }
-      return c;
-    })
-  })),
-  deleteNote: (clipId, noteId) => set((state) => ({
-    clips: state.clips.map(c => {
-      if (c.id === clipId) {
-        return { ...c, notes: c.notes?.filter(n => n.id !== noteId) };
-      }
-      return c;
-    })
-  })),
-  toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying }))
-}));
+        return { tracks: [...state.tracks, newTrack], selectedTrackId: newTrack.id };
+      }),
+      deleteTrack: (id) => set((state) => ({
+          tracks: state.tracks.filter(t => t.id !== id),
+          clips: state.clips.filter(c => c.trackId !== id),
+          selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
+          selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id)
+      })),
+      reorderTrack: (id, index) => set((state) => {
+        const track = state.tracks.find(t => t.id === id);
+        if (!track) return state;
+        const newTracks = state.tracks.filter(t => t.id !== id);
+        newTracks.splice(index, 0, track);
+        return { tracks: newTracks };
+      }),
+      addClip: (trackId, start, bufferUrl) => set((state) => {
+        const track = state.tracks.find(t => t.id === trackId);
+        if (!track) return state;
+        const newClip: Clip = {
+          id: generateId(),
+          trackId,
+          start,
+          duration: 16,
+          type: track.type,
+          notes: [],
+          color: track.color,
+          bufferUrl
+        };
+        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
+      }),
+      duplicateClip: (clipId) => set((state) => {
+        const clip = state.clips.find(c => c.id === clipId);
+        if (!clip) return state;
+        const newClip: Clip = {
+          ...clip,
+          id: generateId(),
+          start: clip.start + clip.duration
+        };
+        if (clip.notes) {
+          newClip.notes = clip.notes.map(n => ({ ...n, id: generateId() }));
+        }
+        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
+      }),
+      deleteClip: (clipId) => set((state) => ({
+          clips: state.clips.filter(c => c.id !== clipId),
+          selectedClipIds: state.selectedClipIds.filter(id => id !== clipId)
+      })),
+      selectTrack: (id) => set({ selectedTrackId: id }),
+      selectClip: (id, multi = false) => set((state) => {
+        if (!id) return { selectedClipIds: [] };
+        if (multi) {
+          if (state.selectedClipIds.includes(id)) {
+            return { selectedClipIds: state.selectedClipIds.filter(c => c !== id) };
+          }
+          return { selectedClipIds: [...state.selectedClipIds, id] };
+        }
+        return { selectedClipIds: [id] };
+      }),
+      selectNote: (id, multi = false) => set((state) => {
+        if (!id) return { selectedNoteIds: [] };
+        if (multi) {
+          if (state.selectedNoteIds.includes(id)) {
+            return { selectedNoteIds: state.selectedNoteIds.filter(n => n !== id) };
+          }
+          return { selectedNoteIds: [...state.selectedNoteIds, id] };
+        }
+        return { selectedNoteIds: [id] };
+      }),
+      setClipboard: (type, items) => set((state) => {
+         if (type === 'clips') return { clipboardClips: items, clipboardNotes: [] };
+         return { clipboardNotes: items, clipboardClips: [] };
+      }),
+      updateTrack: (id, updates) => set((state) => ({
+        tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t)
+      })),
+      updateClip: (id, updates) => set((state) => ({
+        clips: state.clips.map(c => c.id === id ? { ...c, ...updates } : c)
+      })),
+      addNote: (clipId, note) => set((state) => ({
+        clips: state.clips.map(c => c.id === clipId ? { ...c, notes: [...(c.notes || []), note] } : c)
+      })),
+      updateNote: (clipId, noteId, updates) => set((state) => ({
+        clips: state.clips.map(c => {
+          if (c.id === clipId) {
+            return {
+              ...c,
+              notes: c.notes?.map(n => n.id === noteId ? { ...n, ...updates } : n)
+            };
+          }
+          return c;
+        })
+      })),
+      deleteNote: (clipId, noteId) => set((state) => ({
+        clips: state.clips.map(c => {
+          if (c.id === clipId) {
+            return { ...c, notes: c.notes?.filter(n => n.id !== noteId) };
+          }
+          return c;
+        })
+      })),
+      toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying }))
+    }),
+    {
+      partialize: (state) => {
+        const { tracks, clips, bpm } = state;
+        return { tracks, clips, bpm };
+      },
+    }
+  )
+);
+
+export function useDAWStore(): DAWState;
+export function useDAWStore<T>(selector: (state: DAWState) => T): T;
+export function useDAWStore<T>(selector?: (state: DAWState) => T) {
+  return selector ? useStore(dawStore, selector) : useStore(dawStore);
+}
+
+// Expose getState for non-React code that imports useDAWStore.getState
+useDAWStore.getState = dawStore.getState;
+useDAWStore.setState = dawStore.setState;
+
+export function useTemporalStore(): import('zundo').TemporalState<any>;
+export function useTemporalStore<T>(selector: (state: import('zundo').TemporalState<any>) => T): T;
+export function useTemporalStore<T>(selector?: (state: import('zundo').TemporalState<any>) => T) {
+  return selector ? useStore(dawStore.temporal, selector) : useStore(dawStore.temporal);
+}

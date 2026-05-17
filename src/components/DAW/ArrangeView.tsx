@@ -109,7 +109,10 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
 
   // Simple Drag logic
   const handleDragStart = (e: React.DragEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
     e.dataTransfer.setData('text/plain', clip.id);
+    e.dataTransfer.setData('offsetX', offsetX.toString());
     e.dataTransfer.effectAllowed = 'copyMove';
     if (e.altKey) {
         e.dataTransfer.setData('action', 'copy');
@@ -194,6 +197,17 @@ function ClipItem({ clip, trackColor, onContextMenu }: { clip: Clip, trackColor:
                         />
                     );
                 })}
+            </div>
+        )}
+        
+        {clip.type === 'audio' && (
+            <div className="absolute inset-x-0 bottom-2 top-6 flex items-center justify-center opacity-30 pointer-events-none">
+                 {/* Basic representation of a waveform for audio files */}
+                 <div className="w-full h-full object-cover px-2 flex items-center gap-[1px]">
+                    {Array.from({ length: 40 }).map((_, i) => (
+                        <div key={i} className="flex-1 bg-black dark:bg-white rounded-full mx-px" style={{ height: `${20 + Math.random() * 80}%` }} />
+                    ))}
+                 </div>
             </div>
         )}
         
@@ -341,36 +355,67 @@ export function ArrangeView() {
   const handleDragOverTrack = (trackId: string, e: React.DragEvent) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
-      const rect = e.currentTarget.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const SNAP = 0.25;
-      const snappedBeat = Math.round((clickX / PIXELS_PER_BEAT) / SNAP) * SNAP;
-      if (dragSnap?.trackId !== trackId || dragSnap?.beat !== snappedBeat) {
-          setDragSnap({ trackId, beat: snappedBeat });
-      }
   };
 
   const handleDragLeaveTrack = (e: React.DragEvent) => {
       // Small debounce could prevent flicker, but nulling is safest strictly when leaving
   };
 
-  const handleDrop = (trackId: string, e: React.DragEvent) => {
+  const handleDrop = async (trackId: string, e: React.DragEvent) => {
       e.preventDefault();
       setDragSnap(null); // Reset snap guide
-      const clipId = e.dataTransfer.getData('text/plain');
-      const action = e.dataTransfer.getData('action');
-      if (!clipId) return;
-
+      
+      const file = e.dataTransfer.files[0];
       const rect = e.currentTarget.getBoundingClientRect();
       const dropX = e.clientX - rect.left;
       const SNAP = 0.25;
-      const beat = Math.round((dropX / PIXELS_PER_BEAT) / SNAP) * SNAP;
+
+      if (file && file.type.startsWith('audio/')) {
+          const beat = Math.max(0, Math.round((dropX / PIXELS_PER_BEAT) / SNAP) * SNAP);
+          const bufferUrl = URL.createObjectURL(file);
+          // Wait to decode audio data to get duration
+          const ctx = new AudioContext();
+          try {
+              const arrayBuffer = await file.arrayBuffer();
+              const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+              const durationSecs = audioBuffer.duration;
+              const durationBeats = (durationSecs / 60) * useDAWStore.getState().bpm;
+              
+              // We need an audio track to drop this into.
+              let targetTrack = tracks.find(t => t.id === trackId);
+              if (targetTrack?.type !== 'audio') {
+                 useDAWStore.getState().addTrack('audio');
+                 const state = useDAWStore.getState();
+                 targetTrack = state.tracks[state.tracks.length - 1]; // Assume last track
+              }
+              if (targetTrack) {
+                 useDAWStore.getState().addClip(targetTrack.id, beat, bufferUrl);
+                 const newState = useDAWStore.getState();
+                 const newClipId = newState.selectedClipIds[newState.selectedClipIds.length - 1];
+                 if (newClipId) {
+                     updateClip(newClipId, { duration: durationBeats, name: file.name });
+                 }
+              }
+          } catch(err) {
+              console.error("Failed decoding dropped audio", err);
+          }
+          return;
+      }
+      
+      const clipId = e.dataTransfer.getData('text/plain');
+      const offsetXStr = e.dataTransfer.getData('offsetX');
+      const action = e.dataTransfer.getData('action');
+      if (!clipId) return;
+
+      const offsetX = offsetXStr ? parseFloat(offsetXStr) : 0;
+      const startX = Math.max(0, dropX - offsetX);
+      const beat = Math.round((startX / PIXELS_PER_BEAT) / SNAP) * SNAP;
 
       if (action === 'copy' || e.altKey) {
           useDAWStore.getState().duplicateClip(clipId);
           // Set new position for copied clip
           const state = useDAWStore.getState();
-          const newClipId = state.selectedClipIds[0];
+          const newClipId = state.selectedClipIds[state.selectedClipIds.length - 1];
           if (newClipId) {
              updateClip(newClipId, { trackId, start: beat });
           }
@@ -419,6 +464,14 @@ export function ArrangeView() {
                   title="Add MIDI Track"
                 >
                     <Plus size={14} />
+                    <span className="sr-only">MIDI</span>
+                </button>
+                <button 
+                  className="bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 p-1 rounded transition-colors"
+                  onClick={() => addTrack('audio')}
+                  title="Add Audio Track"
+                >
+                    <div className="font-bold text-[10px] px-0.5 leading-none h-[14px] flex items-center">WAV</div>
                 </button>
             </div>
         </div>

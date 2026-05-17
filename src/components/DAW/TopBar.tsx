@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import * as Tone from 'tone';
-import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders } from 'lucide-react';
-import { useDAWStore } from '../../store/dawStore';
+import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell } from 'lucide-react';
+import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 
 export function TopBar() {
-  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen } = useDAWStore();
+  const { isPlaying, isRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore();
+  const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
+  
   const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState('0:00:000');
   const [bpmInput, setBpmInput] = useState(bpm.toString());
@@ -75,11 +77,30 @@ export function TopBar() {
     <div className="h-14 bg-neutral-100 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-800 flex items-center justify-between px-4 text-neutral-700 dark:text-neutral-300 select-none">
       <div className="flex items-center gap-6">
         <h1 className="text-xl font-bold text-neutral-900 dark:text-white tracking-widest flex items-center gap-2">
-            Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
+          🦆 Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
         </h1>
         
         {/* Transport Controls */}
-        <div className="flex items-center gap-2 bg-neutral-200 dark:bg-neutral-800 rounded-md p-1">
+        <div className="flex items-center gap-1 bg-neutral-200 dark:bg-neutral-800 rounded-md p-1">
+          <button 
+            className="p-2 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+            onClick={() => undo()}
+            disabled={pastStates.length === 0}
+            title="Undo"
+          >
+            <Undo2 size={18} />
+          </button>
+          <button 
+            className="p-2 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+            onClick={() => redo()}
+            disabled={futureStates.length === 0}
+            title="Redo"
+          >
+            <Redo2 size={18} />
+          </button>
+          
+          <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700 mx-1" />
+          
           <button 
             className="p-2 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors"
             onClick={handleStop}
@@ -105,6 +126,32 @@ export function TopBar() {
             title="Record Audio (Mic)"
           >
             <Mic size={20} className="fill-neutral-600 dark:fill-neutral-300" />
+          </button>
+          
+          <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700 mx-1" />
+          
+          <button 
+            className={`p-2 rounded transition-colors ${isLooping ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            onClick={() => {
+                toggleLoop();
+                if (!isLooping) {
+                   Tone.Transport.loop = true;
+                   Tone.Transport.loopStart = "0:0:0"; 
+                   Tone.Transport.loopEnd = "4:0:0"; // 4 bars basic snap implementation, fix in AudioEngine later
+                } else {
+                   Tone.Transport.loop = false;
+                }
+            }}
+            title="Cycle Mode"
+          >
+            <Repeat size={18} />
+          </button>
+          <button 
+            className={`p-2 rounded transition-colors ${metronomeOn ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            onClick={toggleMetronome}
+            title="Metronome"
+          >
+            <Bell size={18} />
           </button>
         </div>
 
