@@ -61,6 +61,9 @@ interface DAWState {
   loopStart: number;
   loopEnd: number;
   metronomeOn: boolean;
+  metronomeVolume: number;
+  metronomeSound: 'click' | 'woodblock' | 'electronic';
+  metronomeSubdivisions: number;
   tracks: Track[];
   clips: Clip[];
   selectedTrackId: string | null;
@@ -87,6 +90,9 @@ interface DAWState {
   toggleLoop: () => void;
   setLoopRegion: (start: number, end: number) => void;
   toggleMetronome: () => void;
+  setMetronomeVolume: (volume: number) => void;
+  setMetronomeSound: (sound: 'click' | 'woodblock' | 'electronic') => void;
+  setMetronomeSubdivisions: (subdivisions: number) => void;
   toggleTheme: (mode?: ThemeMode) => void;
   setBottomPanel: (panel: BottomPanel) => void;
   setPanelHeight: (height: number) => void;
@@ -110,6 +116,7 @@ interface DAWState {
   addNote: (clipId: string, note: Note) => void;
   updateNote: (clipId: string, noteId: string, updates: Partial<Note>) => void;
   deleteNote: (clipId: string, noteId: string) => void;
+  quantizeSelectedNotes: (clipId: string) => void;
   toggleRecording: () => void;
 }
 
@@ -138,6 +145,9 @@ export const dawStore = createStore<DAWState>()(
       loopStart: 0,
       loopEnd: 16,
       metronomeOn: false,
+      metronomeVolume: 0.8,
+      metronomeSound: 'click',
+      metronomeSubdivisions: 1,
       isRecording: false,
       selectedClipIds: ['clip-1'],
       selectedNoteIds: [],
@@ -252,6 +262,9 @@ export const dawStore = createStore<DAWState>()(
       toggleLoop: () => set((state) => ({ isLooping: !state.isLooping })),
       setLoopRegion: (start, end) => set({ loopStart: start, loopEnd: end }),
       toggleMetronome: () => set((state) => ({ metronomeOn: !state.metronomeOn })),
+      setMetronomeVolume: (volume) => set({ metronomeVolume: volume }),
+      setMetronomeSound: (sound) => set({ metronomeSound: sound }),
+      setMetronomeSubdivisions: (subdivisions) => set({ metronomeSubdivisions: subdivisions }),
       toggleTheme: (mode) => set((state) => {
         let newTheme = mode;
         if (!newTheme) {
@@ -395,6 +408,29 @@ export const dawStore = createStore<DAWState>()(
           return c;
         })
       })),
+      quantizeSelectedNotes: (clipId) => set((state) => {
+        const snap = state.snapToGrid ? state.snapGridSize : 0;
+        if (snap === 0 || state.selectedNoteIds.length === 0) return state;
+        
+        return {
+          clips: state.clips.map(c => {
+            if (c.id === clipId && c.notes) {
+              return {
+                ...c,
+                notes: c.notes.map(n => {
+                  if (state.selectedNoteIds.includes(n.id)) {
+                    const diff = n.start % snap;
+                    const closestStart = diff >= snap / 2 ? n.start + (snap - diff) : n.start - diff;
+                    return { ...n, start: Math.max(0, closestStart) };
+                  }
+                  return n;
+                })
+              };
+            }
+            return c;
+          })
+        };
+      }),
       deleteNote: (clipId, noteId) => set((state) => ({
         clips: state.clips.map(c => {
           if (c.id === clipId) {

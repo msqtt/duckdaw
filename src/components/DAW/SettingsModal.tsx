@@ -3,7 +3,12 @@ import { useDAWStore } from '../../store/dawStore';
 import { Github, FileDown, FileUp, Moon, Sun, X } from 'lucide-react';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { theme, toggleTheme, getProjectData, loadProject } = useDAWStore();
+  const { 
+    theme, toggleTheme, getProjectData, loadProject,
+    metronomeVolume, setMetronomeVolume,
+    metronomeSound, setMetronomeSound,
+    metronomeSubdivisions, setMetronomeSubdivisions 
+  } = useDAWStore();
   const [githubToken, setGithubToken] = useState(localStorage.getItem('github_token') || '');
   const [githubRepo, setGithubRepo] = useState(localStorage.getItem('github_repo') || '');
   const [githubPath, setGithubPath] = useState(localStorage.getItem('github_path') || 'webdaw_project.json');
@@ -160,6 +165,47 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                  >
                     <div className="w-4 h-4 rounded-full border-[3px] border-current bg-black" />
                  </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Metronome Settings */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase text-neutral-500">Metronome</h3>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
+                <span>Sound</span>
+                <select 
+                  className="bg-transparent text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm"
+                  value={metronomeSound}
+                  onChange={(e) => setMetronomeSound(e.target.value as any)}
+                >
+                  <option className="text-black" value="click">Click</option>
+                  <option className="text-black" value="woodblock">Woodblock</option>
+                  <option className="text-black" value="electronic">Electronic</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
+                <span>Subdivisions</span>
+                <select 
+                  className="bg-transparent text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 outline-none text-sm"
+                  value={metronomeSubdivisions}
+                  onChange={(e) => setMetronomeSubdivisions(parseInt(e.target.value))}
+                >
+                  <option className="text-black" value={1}>Quarter Notes (1x)</option>
+                  <option className="text-black" value={2}>Eighth Notes (2x)</option>
+                  <option className="text-black" value={4}>Sixteenth Notes (4x)</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between bg-neutral-200 dark:bg-neutral-800 p-3 rounded-lg">
+                <span>Volume</span>
+                <input 
+                  type="range" 
+                  min="0" max="1" step="0.01" 
+                  value={metronomeVolume}
+                  onChange={(e) => setMetronomeVolume(parseFloat(e.target.value))}
+                  className="w-32 accent-emerald-500 h-1 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer"
+                />
               </div>
             </div>
           </div>

@@ -48,10 +48,50 @@ class AudioEngine {
     Tone.Transport.bpm.value = bpm;
   }
 
-  setMetronome(enabled: boolean) {
-     if (enabled && this.metronomeLoop) {
+  setMetronome(enabled: boolean, sound: string = 'click', volume: number = 0.8, subdivisions: number = 1) {
+     if (!this.metronome) {
+         this.metronome = new Tone.MembraneSynth({ pitchDecay: 0.008, envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 } }).toDestination();
+     }
+
+     this.metronome.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume);
+
+     let subString = "4n";
+     if (subdivisions === 2) subString = "8n";
+     if (subdivisions === 4) subString = "16n";
+
+     if (this.metronomeLoop) {
+         this.metronomeLoop.dispose();
+     }
+
+     this.metronomeLoop = new Tone.Loop((time) => {
+         const pos = Tone.Transport.position.toString().split(':');
+         const beats = parseInt(pos[1]);
+         const sixteenths = parseFloat(pos[2]);
+
+         let highClick = false;
+         if (beats === 0 && sixteenths < 0.1) highClick = true;
+
+         let pitchHigh = "C4";
+         let pitchLow = "C3";
+         
+         if (sound === 'woodblock') {
+             pitchHigh = "G5";
+             pitchLow = "C5";
+         } else if (sound === 'electronic') {
+             pitchHigh = "C6";
+             pitchLow = "C5";
+         }
+
+         if (highClick) {
+            this.metronome?.triggerAttackRelease(pitchHigh, "32n", time, 1);
+         } else {
+            this.metronome?.triggerAttackRelease(pitchLow, "32n", time, 0.5);
+         }
+     }, subString);
+
+     if (enabled) {
          this.metronomeLoop.start(0);
-     } else if (this.metronomeLoop) {
+     } else {
          this.metronomeLoop.stop();
      }
   }

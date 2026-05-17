@@ -20,7 +20,7 @@ function generateKeys() {
 const KEYS = generateKeys();
 
 export function PianoRoll() {
-  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote, lastNoteDuration, setLastNoteDuration } = useDAWStore();
+  const { clips, tracks, selectedClipIds, updateClip, addNote, deleteNote, updateNote, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen, selectedNoteIds, selectNote, lastNoteDuration, setLastNoteDuration, quantizeSelectedNotes, snapGridSize, snapToGrid } = useDAWStore();
   const [clip, setClip] = useState<Clip | null>(null);
   const [clipTrackColor, setClipTrackColor] = useState<string>('#E2E8F0');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -28,6 +28,18 @@ export function PianoRoll() {
   
   const [marquee, setMarquee] = useState<{ xA: number, yA: number, xB: number, yB: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, noteId?: string, beat?: number } | null>(null);
+
+  useEffect(() => {
+     const handleKeyDown = (e: KeyboardEvent) => {
+         if (e.key === 'q' || e.key === 'Q') {
+             if (clip && selectedNoteIds.length > 0 && snapToGrid) {
+                 quantizeSelectedNotes(clip.id);
+             }
+         }
+     };
+     window.addEventListener('keydown', handleKeyDown);
+     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [clip, selectedNoteIds, snapToGrid, quantizeSelectedNotes]);
 
   useEffect(() => {
      const hideMenu = () => setContextMenu(null);
@@ -216,6 +228,14 @@ export function PianoRoll() {
       <div className="h-8 bg-neutral-200/80 dark:bg-neutral-800/80 border-b border-neutral-300 dark:border-neutral-800 flex items-center px-4 justify-between shrink-0">
         <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300 shrink-0 select-text">PIANO ROLL ({clip.name || clip.id})</span>
         <div className="flex items-center gap-2">
+            <button 
+              onClick={() => quantizeSelectedNotes(clip.id)}
+              disabled={selectedNoteIds.length === 0 || !snapToGrid}
+              className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white border border-neutral-400 dark:border-neutral-600 rounded px-2 py-0.5 disabled:opacity-50 transition-colors"
+            >
+              Quantize (Q)
+            </button>
+            <div className="w-px h-4 bg-neutral-300 dark:bg-neutral-700 mx-1" />
             <button 
               onClick={() => setPanelFullScreen(!panelFullScreen)}
               className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
@@ -430,6 +450,16 @@ export function PianoRoll() {
                           }}
                       >
                           Duplicate
+                      </button>
+                      <button 
+                          className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-current"
+                          disabled={!snapToGrid}
+                          onClick={() => {
+                              quantizeSelectedNotes(clip.id);
+                              setContextMenu(null);
+                          }}
+                      >
+                          Quantize (Q)
                       </button>
                   </>
               ) : contextMenu.beat !== undefined ? (

@@ -14,7 +14,7 @@ import { useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
 
 export default function App() {
-  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, loopStart, loopEnd } = useDAWStore();
+  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, loopStart, loopEnd } = useDAWStore();
   const [init, setInit] = useState(false);
 
   useEffect(() => {
@@ -126,8 +126,8 @@ export default function App() {
   }, [tracks, clips]);
 
   useEffect(() => {
-    engine.setMetronome(metronomeOn);
-  }, [metronomeOn]);
+    engine.setMetronome(metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions);
+  }, [metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions]);
 
   useEffect(() => {
     engine.setLoop(isLooping, loopStart, loopEnd);
