@@ -326,12 +326,15 @@ function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: C
         )}
         
         {clip.type === 'audio' && (
-            <div className="absolute inset-x-0 bottom-2 top-6 flex items-center justify-center opacity-30 pointer-events-none">
-                 <AudioWaveform url={clip.bufferUrl} />
+            <div className="absolute inset-x-0 bottom-2 top-6 flex items-center justify-start opacity-30 pointer-events-none overflow-hidden">
+                 <div style={{ width: clip.originalDuration ? `${(clip.originalDuration / clip.duration) * 100}%` : '100%', height: '100%', left: 0, position: 'absolute' }}>
+                     <AudioWaveform url={clip.bufferUrl} />
+                 </div>
             </div>
         )}
         
         {/* Resize Handles */}
+        {clip.type !== 'audio' && (
         <div 
             draggable
             onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -362,6 +365,7 @@ function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: C
                 window.addEventListener('pointerup', onUp);
             }}
         />
+        )}
         <div 
             draggable
             onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -375,7 +379,10 @@ function ClipItem({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: C
                 const onMove = (moveEvent: PointerEvent) => {
                     const diffPx = moveEvent.clientX - startX;
                     const diffBeats = diffPx / PIXELS_PER_BEAT;
-                    const newDur = Math.max(SNAP, Math.round((startDur + diffBeats) / SNAP) * SNAP);
+                    let newDur = Math.max(SNAP, Math.round((startDur + diffBeats) / SNAP) * SNAP);
+                    if (clip.type === 'audio' && clip.originalDuration) {
+                        newDur = Math.min(newDur, clip.originalDuration);
+                    }
                     updateClip(clip.id, { duration: newDur });
                 };
                 
@@ -560,11 +567,11 @@ export function ArrangeView() {
                  targetTrack = state.tracks[state.tracks.length - 1]; // Assume last track
               }
               if (targetTrack) {
-                 useDAWStore.getState().addClip(targetTrack.id, beat, bufferUrl);
+                 useDAWStore.getState().addClip(targetTrack.id, beat, bufferUrl, durationBeats);
                  const newState = useDAWStore.getState();
                  const newClipId = newState.selectedClipIds[newState.selectedClipIds.length - 1];
                  if (newClipId) {
-                     updateClip(newClipId, { duration: durationBeats, name: file.name });
+                     updateClip(newClipId, { name: file.name });
                  }
               }
           } catch(err) {
@@ -962,11 +969,25 @@ export function ArrangeView() {
                                     type="file" 
                                     accept="audio/*" 
                                     className="hidden" 
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
                                             const url = URL.createObjectURL(file);
-                                            addClip(contextMenu.trackId!, contextMenu.beat!, url);
+                                            const ctx = new AudioContext();
+                                            try {
+                                                const arrayBuffer = await file.arrayBuffer();
+                                                const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                                                const durationSecs = audioBuffer.duration;
+                                                const durationBeats = (durationSecs / 60) * useDAWStore.getState().bpm;
+                                                addClip(contextMenu.trackId!, contextMenu.beat!, url, durationBeats);
+                                                const newState = useDAWStore.getState();
+                                                const newClipId = newState.selectedClipIds[newState.selectedClipIds.length - 1];
+                                                if (newClipId) {
+                                                    updateClip(newClipId, { name: file.name });
+                                                }
+                                            } catch (err) {
+                                                addClip(contextMenu.trackId!, contextMenu.beat!, url);
+                                            }
                                             setContextMenu(null);
                                         }
                                     }}

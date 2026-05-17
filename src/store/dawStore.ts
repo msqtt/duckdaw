@@ -21,6 +21,7 @@ export interface Clip {
   trackId: string;
   start: number; // in beats (global timeline)
   duration: number; // in beats
+  originalDuration?: number; // max duration constraint
   type: TrackType;
   notes: Note[]; // for midi
   bufferUrl?: string; // for audio
@@ -106,7 +107,7 @@ interface DAWState {
   addTrack: (type: TrackType) => void;
   deleteTrack: (id: string) => void;
   reorderTrack: (id: string, index: number) => void;
-  addClip: (trackId: string, start: number, bufferUrl?: string) => void;
+  addClip: (trackId: string, start: number, bufferUrl?: string, duration?: number) => void;
   duplicateClip: (clipId: string) => void;
   deleteClip: (clipId: string) => void;
   selectTrack: (id: string | null) => void;
@@ -338,14 +339,15 @@ export const dawStore = createStore<DAWState>()(
         newTracks.splice(index, 0, track);
         return { tracks: newTracks };
       }),
-      addClip: (trackId, start, bufferUrl) => set((state) => {
+      addClip: (trackId, start, bufferUrl, duration) => set((state) => {
         const track = state.tracks.find(t => t.id === trackId);
         if (!track) return state;
         const newClip: Clip = {
           id: generateId(),
           trackId,
           start,
-          duration: 16,
+          duration: duration || 16,
+          originalDuration: duration,
           type: track.type,
           notes: [],
           color: track.color,

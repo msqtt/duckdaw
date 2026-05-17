@@ -246,12 +246,17 @@ class AudioEngine {
         const synth = this.synths.get(clip.trackId);
         if (!synth) return;
 
-        const events = clip.notes.map(note => ({
-          time: `0:${note.start}`,
-          note: note.note,
-          duration: `0:${note.duration}`,
-          velocity: note.velocity
-        }));
+        const events = clip.notes
+          .filter(n => n.start < clip.duration)
+          .map(note => {
+            const clampedDur = Math.min(note.duration, clip.duration - note.start);
+            return {
+              time: `0:${note.start}`,
+              note: note.note,
+              duration: `0:${clampedDur}`,
+              velocity: note.velocity
+            };
+          });
 
         const part = new Tone.Part((time, value) => {
           synth.triggerAttackRelease(value.note, value.duration, time, value.velocity);
@@ -267,7 +272,7 @@ class AudioEngine {
              const player = new Tone.Player({
                  url: clip.bufferUrl,
                  onload: () => {
-                    player.sync().start(startTime);
+                    player.sync().start(startTime, 0, `0:${clip.duration}:0`);
                  }
              }).connect(channel);
              this.audioPlayers.set(clip.id, player);
