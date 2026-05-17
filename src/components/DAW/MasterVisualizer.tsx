@@ -62,11 +62,11 @@ export function MasterVisualizer() {
 
     return (
         <div 
-           className="relative group bg-neutral-900 border border-neutral-700 w-24 h-8 overflow-hidden cursor-pointer rounded grid place-items-center" 
+           className="relative group bg-neutral-900 border border-neutral-700 w-48 h-8 flex-shrink-0 overflow-hidden cursor-pointer rounded grid place-items-center" 
            onClick={() => setMode(m => m === 'waveform' ? 'fft' : 'waveform')} 
            title={`Visualizer: ${mode.toUpperCase()} (Click to toggle)`}
         >
-           <canvas ref={canvasRef} width={96} height={32} className="w-full h-full block" />
+           <canvas ref={canvasRef} width={192} height={32} className="w-full h-full block" />
         </div>
     );
 }

@@ -1,5 +1,5 @@
 import { useDAWStore, Track, Clip } from '../../store/dawStore';
-import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic } from 'lucide-react';
+import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic, ChevronLeft, ChevronRight } from 'lucide-react';
 import React, { useRef, useState, useEffect } from 'react';
 import * as Tone from 'tone';
 import { Dropdown } from '../ui/Dropdown';
@@ -449,6 +449,9 @@ export function ArrangeView() {
 
   const contextMenuRef = useRef<HTMLDivElement>(null);
   
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   useEffect(() => {
      const hideMenu = (e: PointerEvent) => {
          if (contextMenuRef.current && contextMenuRef.current.contains(e.target as Node)) {
@@ -649,10 +652,13 @@ export function ArrangeView() {
       />
       <div className="flex flex-1 overflow-hidden bg-neutral-50 dark:bg-neutral-900 relative">
       {/* Track Headers Sidebar */}
-      <div className="w-64 flex-shrink-0 bg-neutral-50 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col z-20">
+      <div 
+         className={`flex-shrink-0 bg-neutral-50 dark:bg-neutral-900 border-neutral-300 dark:border-neutral-800 flex flex-col z-20 transition-all duration-300 ${sidebarCollapsed ? 'w-0 overflow-hidden border-r-0' : 'border-r'}`}
+         style={{ width: sidebarCollapsed ? 0 : `${sidebarWidth}px`, opacity: sidebarCollapsed ? 0 : 1 }}
+      >
         <div className="h-8 border-b border-neutral-300 dark:border-neutral-800 bg-neutral-200 dark:bg-neutral-800/50 flex items-center px-4 justify-between">
             <span className="text-xs font-bold text-neutral-600 dark:text-neutral-400">TRACKS</span>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-shrink-0">
                 <Dropdown
                    options={[
                      { value: 'midi', label: 'MIDI Track', icon: <Music size={14} /> },
@@ -666,6 +672,13 @@ export function ArrangeView() {
                      </div>
                    }
                 />
+                <button
+                    className="bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 p-1 rounded transition-colors flex items-center justify-center ml-1"
+                    onClick={() => setSidebarCollapsed(true)}
+                    title="Collapse Sidebar"
+                >
+                    <ChevronLeft size={14} />
+                </button>
             </div>
         </div>
         <div 
@@ -692,9 +705,46 @@ export function ArrangeView() {
                     <Plus size={20} className="mr-2" /> Add Track
                  </div>
                }
-          />
+            />
         </div>
       </div>
+
+      {/* Sidebar Resizer */}
+      {!sidebarCollapsed && (
+          <div 
+             className="w-1.5 hover:bg-emerald-500/50 cursor-col-resize z-30 transition-colors relative flex-shrink-0"
+             onPointerDown={(e) => {
+                 e.stopPropagation();
+                 e.currentTarget.setPointerCapture(e.pointerId);
+                 const startX = e.clientX;
+                 const startWidth = sidebarWidth;
+                 const onMove = (moveEvent: PointerEvent) => {
+                     const dx = moveEvent.clientX - startX;
+                     const newWidth = Math.max(160, Math.min(600, startWidth + dx));
+                     setSidebarWidth(newWidth);
+                 };
+                 const onUp = () => {
+                     window.removeEventListener('pointermove', onMove);
+                     window.removeEventListener('pointerup', onUp);
+                 };
+                 window.addEventListener('pointermove', onMove);
+                 window.addEventListener('pointerup', onUp);
+             }}
+          />
+      )}
+
+      {/* Expand sidebar button when collapsed */}
+      {sidebarCollapsed && (
+          <div className="absolute left-0 top-0 bottom-0 w-8 z-40 p-1 flex mt-8">
+             <button
+                 className="w-6 h-12 bg-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-r shadow-md flex items-center justify-center text-neutral-500 hover:text-emerald-500 transition-colors"
+                 onClick={() => setSidebarCollapsed(false)}
+                 title="Expand Sidebar"
+             >
+                 <ChevronRight size={16} />
+             </button>
+          </div>
+      )}
 
       {/* Timeline & Clips Area */}
       <div 
