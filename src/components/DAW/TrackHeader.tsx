@@ -178,7 +178,7 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
                 value={track.volume}
                 onClick={e => e.stopPropagation()}
                 onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
-                className="flex-1 h-1 bg-neutral-300 dark:bg-neutral-700 rounded-full appearance-none cursor-ew-resize accent-emerald-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                className="flex-1 h-1 bg-neutral-200 dark:bg-neutral-700 rounded-full appearance-none cursor-ew-resize accent-emerald-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:rounded-full"
             />
             <span className="text-[10px] text-neutral-400 w-6 text-right tabular-nums">
                 {Math.round(track.volume * 100)}

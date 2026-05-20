@@ -51,22 +51,22 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
       <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2">
         <div className="flex flex-col w-full px-1 gap-1 mb-2">
           {/* FX Sends */}
-          <div className="flex justify-between items-center text-[9px] text-emerald-600">
+          <div className="flex justify-between items-center text-[9px] text-emerald-600 border-none">
              <span>REV</span>
-             <input type="range" min="0" max="1" step="0.05" value={track.reverb || 0} onChange={(e) => updateTrack(track.id, { reverb: parseFloat(e.target.value) })} className="w-12 h-1 accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" />
+             <input type="range" min="0" max="1" step="0.05" value={track.reverb || 0} onChange={(e) => updateTrack(track.id, { reverb: parseFloat(e.target.value) })} className="w-12 h-1 accent-emerald-500 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" />
           </div>
-          <div className="flex justify-between items-center text-[9px] text-blue-500 mb-2">
+          <div className="flex justify-between items-center text-[9px] text-blue-500 mb-2 border-none">
              <span>DLY</span>
-             <input type="range" min="0" max="1" step="0.05" value={track.delay || 0} onChange={(e) => updateTrack(track.id, { delay: parseFloat(e.target.value) })} className="w-12 h-1 accent-blue-500 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" />
+             <input type="range" min="0" max="1" step="0.05" value={track.delay || 0} onChange={(e) => updateTrack(track.id, { delay: parseFloat(e.target.value) })} className="w-12 h-1 accent-blue-500 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-blue-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" />
           </div>
           
           {/* Synth Env */}
           {track.type === 'midi' && track.env && (
-             <div className="grid grid-cols-2 gap-x-1 gap-y-1 bg-black/10 dark:bg-black/30 p-1 rounded">
-                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">A</span><input type="range" min="0.001" max="2" step="0.01" value={track.env.attack} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, attack: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
-                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">D</span><input type="range" min="0.01" max="2" step="0.01" value={track.env.decay} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, decay: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
-                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">S</span><input type="range" min="0" max="1" step="0.01" value={track.env.sustain} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, sustain: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
-                <div className="flex flex-col items-center"><span className="text-[8px] text-neutral-500">R</span><input type="range" min="0.01" max="5" step="0.01" value={track.env.release} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, release: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize" /></div>
+             <div className="grid grid-cols-2 gap-x-1 gap-y-1 bg-black/10 dark:bg-black/30 p-1 rounded border-none">
+                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">A</span><input type="range" min="0.001" max="2" step="0.01" value={track.env.attack} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, attack: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
+                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">D</span><input type="range" min="0.01" max="2" step="0.01" value={track.env.decay} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, decay: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
+                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">S</span><input type="range" min="0" max="1" step="0.01" value={track.env.sustain} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, sustain: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
+                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">R</span><input type="range" min="0.01" max="5" step="0.01" value={track.env.release} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, release: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
              </div>
           )}
         </div>
@@ -82,7 +82,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
               min="0" max="1" step="0.01" 
               value={track.volume}
               onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
-              className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-6 top-0"
+              className="h-full hover:cursor-ns-resize accent-emerald-500 bg-neutral-200 dark:bg-neutral-800 rounded-full appearance-none w-1.5 absolute right-6 top-0 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-neutral-400 dark:[&::-webkit-slider-thumb]:border-neutral-600 [&::-webkit-slider-thumb]:rounded-sm [&::-webkit-slider-thumb]:shadow [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-neutral-400 dark:[&::-moz-range-thumb]:border-neutral-600 [&::-moz-range-thumb]:rounded-sm"
               style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
             />
         </div>
@@ -95,7 +95,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
             min="-1" max="1" step="0.01" 
             value={track.pan}
             onChange={(e) => updateTrack(track.id, { pan: parseFloat(e.target.value) })}
-            className="w-full accent-blue-500 h-1 bg-neutral-300 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize"
+            className="w-full accent-blue-500 h-1 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:bg-blue-500 [&::-moz-range-thumb]:rounded-full"
           />
       </div>
     </div>
@@ -141,7 +141,7 @@ function MasterChannel() {
               min="0" max="1" step="0.01" 
               value={masterVolume}
               onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
-              className="h-full hover:cursor-ns-resize accent-red-500 bg-neutral-300 dark:bg-neutral-700 rounded-lg appearance-none w-1 custom-vertical-range absolute right-6 top-0"
+              className="h-full hover:cursor-ns-resize accent-red-500 bg-neutral-200 dark:bg-neutral-800 rounded-full appearance-none w-1.5 absolute right-6 top-0 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-red-500 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-neutral-400 dark:[&::-webkit-slider-thumb]:border-neutral-600 [&::-webkit-slider-thumb]:rounded-sm [&::-webkit-slider-thumb]:shadow [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-red-500 [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-neutral-400 dark:[&::-moz-range-thumb]:border-neutral-600 [&::-moz-range-thumb]:rounded-sm"
               style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
             />
         </div>

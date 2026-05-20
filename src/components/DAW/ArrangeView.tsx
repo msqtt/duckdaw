@@ -702,14 +702,14 @@ export function ArrangeView() {
         )}
 
         {/* Zoom Controls */}
-        <div className="fixed bottom-6 right-6 flex items-center gap-2 bg-neutral-800/90 p-2 rounded-full shadow-lg z-50 text-white backdrop-blur-sm">
-           <span className="text-xs font-bold px-2 text-neutral-300">ZOOM</span>
+        <div className="fixed bottom-6 right-6 flex items-center gap-2 bg-white/95 dark:bg-neutral-800/95 p-2 rounded-full shadow-lg border border-neutral-200 dark:border-neutral-700 z-50 text-neutral-800 dark:text-white backdrop-blur-sm transition-colors">
+           <span className="text-xs font-bold px-2 text-neutral-500 dark:text-neutral-300">ZOOM</span>
            <input 
               type="range"
               min="5" max="80"
               value={zoom}
               onChange={e => setZoom(parseInt(e.target.value))}
-              className="w-24 accent-emerald-500"
+              className="w-24 accent-emerald-500 h-1 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full"
            />
         </div>
       </div>
