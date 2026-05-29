@@ -35,17 +35,47 @@ export async function createDuckDawPackage(name: string, description?: string): 
   const store = useDAWStore.getState();
   const zip = new JSZip();
 
+  const projectId = crypto.randomUUID();
+
+  // Clone clips so we don't mutate the active store
+  const clips = JSON.parse(JSON.stringify(store.clips));
+  const samplePaths: string[] = [];
+  
+  // Pack Audio Clips
+  for (const clip of clips) {
+    if (clip.type === 'audio' && clip.bufferUrl && clip.bufferUrl.startsWith('blob:')) {
+      try {
+        const response = await fetch(clip.bufferUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        
+        const filename = `${clip.id}.wav`;
+        const path = `samples/${filename}`;
+        
+        zip.file(path, arrayBuffer);
+        
+        clip.bufferUrl = path;
+        samplePaths.push(filename);
+      } catch (err) {
+        console.warn(`Failed to pack audio clip ${clip.id}`, err);
+      }
+    }
+  }
+
   const manifest: Manifest = {
     format: 'duckdaw',
     version: DUCKDAW_FORMAT_VERSION,
     generator: 'duckdaw',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    projectId: crypto.randomUUID(), // A real app would persist this in the store
+    projectId,
     name: name,
     bpm: store.bpm,
     timeSignature: store.timeSignature,
-    description
+    description,
+    resources: {
+      samples: samplePaths,
+      presets: []
+    }
   };
 
   const projectData = {
@@ -73,18 +103,15 @@ export async function createDuckDawPackage(name: string, description?: string): 
       sends: [],
       automationLanes: []
     })),
-    clips: store.clips,
+    clips: clips,
     markers: [],
     automation: [],
     tempoTrack: [{ position: 0, bpm: store.bpm, curve: 'linear' }],
-    arrangements: [{ id: crypto.randomUUID(), name: 'Main', clips: store.clips.map(c => c.id) }]
+    arrangements: [{ id: crypto.randomUUID(), name: 'Main', clips: clips.map(c => c.id) }]
   };
 
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
   zip.file('project.json', JSON.stringify(projectData, null, 2));
-
-  // Note: Resolving Blob URLs into ArrayBuffers would go here.
-  // For now, we package what we have.
 
   return await zip.generateAsync({ type: 'blob' });
 }
@@ -113,6 +140,20 @@ export async function loadDuckDawPackage(file: File | Blob): Promise<ProjectPack
     for (const samplePath of manifest.resources.samples) {
       const fileData = await loadedZip.file(`samples/${samplePath}`)?.async('arraybuffer');
       if (fileData) samples.set(samplePath, fileData);
+    }
+  }
+
+  // Restore audio blob URLs in projectData
+  if (project.clips) {
+    for (const clip of project.clips) {
+      if (clip.type === 'audio' && clip.bufferUrl && clip.bufferUrl.startsWith('samples/')) {
+        const sampleName = clip.bufferUrl.replace('samples/', '');
+        const arrayBuffer = samples.get(sampleName);
+        if (arrayBuffer) {
+           const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+           clip.bufferUrl = URL.createObjectURL(blob);
+        }
+      }
     }
   }
 
