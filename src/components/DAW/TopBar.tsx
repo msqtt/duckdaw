@@ -7,11 +7,15 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
+import { saveProject, openProject } from '../../lib/projectStorage';
+import toast from 'react-hot-toast';
 
 import { useShallow } from 'zustand/react/shallow';
 
 export function TopBar() {
-  const { isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore(useShallow(state => ({
+  const { projectName, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore(useShallow(state => ({
+      projectName: state.projectName,
+      isDirty: state.isDirty,
       isPlaying: state.isPlaying,
       isRecording: state.isRecording,
       isMicRecording: state.isMicRecording,
@@ -127,9 +131,58 @@ export function TopBar() {
   return (
     <div className="h-14 bg-neutral-100 dark:bg-neutral-900 border-b border-neutral-300 dark:border-neutral-800 flex items-center justify-between px-4 text-neutral-700 dark:text-neutral-300 select-none">
       <div className="flex items-center gap-6">
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-white tracking-widest flex items-center gap-2">
-          🦆 Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
-        </h1>
+        <div className="flex items-center gap-4">
+          <Dropdown
+            align="left"
+            options={[
+              { value: 'new', label: 'New Project (Reset)' },
+              { value: 'open', label: 'Open... (Ctrl+O)' },
+              { value: 'save', label: 'Save (Ctrl+S)' },
+              { value: 'save_as', label: 'Save As... (Ctrl+Shift+S)' }
+            ]}
+            onChange={async (val) => {
+              if (val === 'save') {
+                try {
+                  await saveProject(false);
+                  toast.success('Project saved');
+                } catch (e: any) {
+                  toast.error(e.message);
+                }
+              } else if (val === 'save_as') {
+                try {
+                  await saveProject(true);
+                  toast.success('Project saved as new file');
+                } catch (e: any) {
+                  toast.error(e.message);
+                }
+              } else if (val === 'open') {
+                try {
+                  const opened = await openProject();
+                  if (opened) toast.success('Project loaded');
+                } catch (e: any) {
+                  toast.error(e.message);
+                }
+              } else if (val === 'new') {
+                useDAWStore.getState().loadProject({ bpm: 120, tracks: [], clips: [] });
+                useDAWStore.getState().setProjectName('New Project');
+                toast.success('New project created');
+              }
+            }}
+            trigger={
+              <div className="flex items-center gap-1 hover:opacity-80 py-1 transition-opacity">
+                <h1 className="text-xl font-bold text-neutral-900 dark:text-white tracking-widest flex items-center gap-2 m-0 p-0">
+                  🦆 Duck<span className="text-emerald-600 dark:text-emerald-500">DAW</span>
+                </h1>
+                <ChevronDown size={14} className="ml-1 opacity-50" />
+              </div>
+            }
+          />
+          <div className="h-4 w-px bg-neutral-300 dark:bg-neutral-700 mx-2" />
+          <div className="text-sm font-medium text-neutral-600 dark:text-neutral-400 cursor-default">
+            {projectName}
+            {isDirty && <span className="text-emerald-500 ml-1 font-bold">*</span>}
+          </div>
+        </div>
         
         {/* Transport Controls */}
         <div className="flex items-center gap-1 bg-neutral-200 dark:bg-neutral-800 rounded-md p-1">

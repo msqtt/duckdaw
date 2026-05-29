@@ -12,10 +12,23 @@ import { Mixer } from './components/DAW/Mixer';
 import { ExportModal } from './components/DAW/ExportModal';
 import { useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
+import { saveProject, openProject } from './lib/projectStorage';
+import toast, { Toaster } from 'react-hot-toast';
 
 export default function DAWApp() {
-  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isMicRecording } = useDAWStore();
+  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isMicRecording, isDirty } = useDAWStore();
   const [init, setInit] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (useDAWStore.getState().isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     // Keyboard shortcuts
@@ -120,6 +133,51 @@ export default function DAWApp() {
   }, []);
 
   useEffect(() => {
+    const handleGlobalShortcuts = async (e: KeyboardEvent) => {
+      // Allow Ctrl+S / Ctrl+O even if focused inside inputs
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
+        e.preventDefault();
+        try {
+          const forceDialog = e.shiftKey;
+          await saveProject(forceDialog);
+          toast.success(forceDialog ? 'Project saved as new file' : 'Project saved');
+        } catch (err: any) {
+          toast.error(`Save failed: ${err.message}`);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyO') {
+        e.preventDefault();
+        try {
+          const opened = await openProject();
+          if (opened) toast.success('Project loaded');
+        } catch (err: any) {
+          toast.error(`Load failed: ${err.message}`);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, []);
+
+  // Autosave periodically
+  useEffect(() => {
+    let active = true;
+    const autosaveInterval = setInterval(async () => {
+      const state = useDAWStore.getState();
+      if (state.isDirty) {
+         try {
+            await saveProject(false, true);
+            if (active && document.visibilityState === 'visible') {
+                toast.success('Autosaved project');
+            }
+         } catch (err) {
+            console.error('Autosave failed:', err);
+         }
+      }
+    }, 3 * 60 * 1000); // 3 minutes
+    return () => { active = false; clearInterval(autosaveInterval); };
+  }, []);
+
+  useEffect(() => {
     // Sync state to audio engine
     engine.syncTracks(tracks);
     engine.syncClips(clips);
@@ -205,6 +263,7 @@ export default function DAWApp() {
         {bottomPanel === 'mixer' && <Mixer />}
       </div>
       <ExportModal />
+      <Toaster position="bottom-right" toastOptions={{ className: 'dark:bg-neutral-800 dark:text-neutral-100', style: { borderRadius: '8px', background: '#333', color: '#fff' } }} />
     </div>
   );
 }

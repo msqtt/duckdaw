@@ -52,6 +52,7 @@ export interface Track {
 }
 
 interface DAWState {
+  projectName: string;
   bpm: number;
   timeSignature: [number, number];
   theme: ThemeMode;
@@ -81,8 +82,11 @@ interface DAWState {
   exportModalOpen: boolean;
   zoom: number; // Pixels per beat
   lastNoteDuration: number;
+  isDirty: boolean; // Unsaved changes
   
   // Actions
+  setProjectName: (name: string) => void;
+  setDirty: (dirty: boolean) => void;
   setBpm: (bpm: number) => void;
   setTimeSignature: (ts: [number, number]) => void;
   setZoom: (zoom: number) => void;
@@ -134,6 +138,7 @@ const getRandomColor = () => {
 export const dawStore = createStore<DAWState>()(
   temporal(
     (set, get) => ({
+      projectName: 'My DuckDAW Project',
       bpm: 120,
       timeSignature: [4, 4],
       zoom: 20,
@@ -141,6 +146,7 @@ export const dawStore = createStore<DAWState>()(
       panelHeight: 300,
       panelFullScreen: false,
       exportModalOpen: false,
+      isDirty: false,
       lastNoteDuration: 0.5,
       theme: 'dark',
       isPlaying: false,
@@ -255,9 +261,12 @@ export const dawStore = createStore<DAWState>()(
         }
       ],
       selectedTrackId: 'track-1',
+      
+      setProjectName: (name) => set({ projectName: name, isDirty: true }),
+      setDirty: (dirty) => set({ isDirty: dirty }),
 
-      setBpm: (bpm) => set({ bpm }),
-      setTimeSignature: (ts) => set({ timeSignature: ts }),
+      setBpm: (bpm) => set({ bpm, isDirty: true }),
+      setTimeSignature: (ts) => set({ timeSignature: ts, isDirty: true }),
       setZoom: (zoom) => set({ zoom }),
       setSnapGridSize: (size) => set({ snapGridSize: size }),
       setSnapToGrid: (snap) => set({ snapToGrid: snap }),
@@ -324,20 +333,21 @@ export const dawStore = createStore<DAWState>()(
           delay: 0,
           env: type === 'midi' ? { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } : undefined
         };
-        return { tracks: [...state.tracks, newTrack], selectedTrackId: newTrack.id };
+        return { tracks: [...state.tracks, newTrack], selectedTrackId: newTrack.id, isDirty: true };
       }),
       deleteTrack: (id) => set((state) => ({
           tracks: state.tracks.filter(t => t.id !== id),
           clips: state.clips.filter(c => c.trackId !== id),
           selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
-          selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id)
+          selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id),
+          isDirty: true
       })),
       reorderTrack: (id, index) => set((state) => {
         const track = state.tracks.find(t => t.id === id);
         if (!track) return state;
         const newTracks = state.tracks.filter(t => t.id !== id);
         newTracks.splice(index, 0, track);
-        return { tracks: newTracks };
+        return { tracks: newTracks, isDirty: true };
       }),
       addClip: (trackId, start, bufferUrl, duration) => set((state) => {
         const track = state.tracks.find(t => t.id === trackId);
@@ -353,7 +363,7 @@ export const dawStore = createStore<DAWState>()(
           color: track.color,
           bufferUrl
         };
-        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
+        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id], isDirty: true };
       }),
       duplicateClip: (clipId) => set((state) => {
         const clip = state.clips.find(c => c.id === clipId);
@@ -366,11 +376,12 @@ export const dawStore = createStore<DAWState>()(
         if (clip.notes) {
           newClip.notes = clip.notes.map(n => ({ ...n, id: generateId() }));
         }
-        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id] };
+        return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id], isDirty: true };
       }),
       deleteClip: (clipId) => set((state) => ({
           clips: state.clips.filter(c => c.id !== clipId),
-          selectedClipIds: state.selectedClipIds.filter(id => id !== clipId)
+          selectedClipIds: state.selectedClipIds.filter(id => id !== clipId),
+          isDirty: true
       })),
       selectTrack: (id) => set({ selectedTrackId: id }),
       selectClip: (id, multi = false) => set((state) => {
@@ -402,13 +413,16 @@ export const dawStore = createStore<DAWState>()(
          return { clipboardNotes: items, clipboardClips: [] };
       }),
       updateTrack: (id, updates) => set((state) => ({
-        tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t)
+        tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t),
+        isDirty: true
       })),
       updateClip: (id, updates) => set((state) => ({
-        clips: state.clips.map(c => c.id === id ? { ...c, ...updates } : c)
+        clips: state.clips.map(c => c.id === id ? { ...c, ...updates } : c),
+        isDirty: true
       })),
       addNote: (clipId, note) => set((state) => ({
-        clips: state.clips.map(c => c.id === clipId ? { ...c, notes: [...(c.notes || []), note] } : c)
+        clips: state.clips.map(c => c.id === clipId ? { ...c, notes: [...(c.notes || []), note] } : c),
+        isDirty: true
       })),
       updateNote: (clipId, noteId, updates) => set((state) => ({
         clips: state.clips.map(c => {
@@ -419,7 +433,8 @@ export const dawStore = createStore<DAWState>()(
             };
           }
           return c;
-        })
+        }),
+        isDirty: true
       })),
       quantizeSelectedNotes: (clipId) => set((state) => {
         const snap = state.snapToGrid ? state.snapGridSize : 0;
@@ -441,7 +456,8 @@ export const dawStore = createStore<DAWState>()(
               };
             }
             return c;
-          })
+          }),
+          isDirty: true
         };
       }),
       deleteNote: (clipId, noteId) => set((state) => ({
@@ -450,7 +466,8 @@ export const dawStore = createStore<DAWState>()(
             return { ...c, notes: c.notes?.filter(n => n.id !== noteId) };
           }
           return c;
-        })
+        }),
+        isDirty: true
       })),
       toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying })),
       toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying }))

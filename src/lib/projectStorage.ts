@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import * as idb from 'idb-keyval';
 import { useDAWStore } from '../store/dawStore';
 
 // A basic structure, matching the spec
@@ -31,8 +32,9 @@ export interface ProjectPackage {
 
 export const DUCKDAW_FORMAT_VERSION = '1.1.0';
 
-export async function createDuckDawPackage(name: string, description?: string): Promise<Blob> {
+export async function createDuckDawPackage(name?: string, description?: string): Promise<Blob> {
   const store = useDAWStore.getState();
+  const projectName = name || store.projectName;
   const zip = new JSZip();
 
   const projectId = crypto.randomUUID();
@@ -68,7 +70,7 @@ export async function createDuckDawPackage(name: string, description?: string): 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     projectId,
-    name: name,
+    name: projectName,
     bpm: store.bpm,
     timeSignature: store.timeSignature,
     description,
@@ -181,4 +183,93 @@ export async function saveToFileSystemAsDownload(blob: Blob, name: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// File System Access API wrappers
+const FILE_HANDLE_KEY = 'duckdaw_current_file_handle';
+
+export async function saveProject(forceDialog = false, isAutoSave = false) {
+  const store = useDAWStore.getState();
+  let handle: FileSystemFileHandle | undefined = await idb.get(FILE_HANDLE_KEY);
+  
+  if (forceDialog || !handle) {
+    if (isAutoSave) return; // don't throw UI popups on autosave
+
+    if (!('showSaveFilePicker' in window)) {
+       // Fallback to blob download
+       const blob = await createDuckDawPackage();
+       await saveToFileSystemAsDownload(blob, store.projectName);
+       store.setDirty(false);
+       return;
+    }
+    
+    try {
+      handle = await (window as any).showSaveFilePicker({
+        suggestedName: `${store.projectName}.duckdaw`,
+        types: [{
+          description: 'DuckDAW Project',
+          accept: { 'application/zip': ['.duckdaw'] }
+        }]
+      });
+      await idb.set(FILE_HANDLE_KEY, handle);
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
+      throw e;
+    }
+  }
+
+  if (handle) {
+    // Check permission
+    if (await (handle as any).queryPermission({ mode: 'readwrite' }) !== 'granted') {
+      if (isAutoSave) return; // Skip requesting permissions blocking autosave internally
+      if (await (handle as any).requestPermission({ mode: 'readwrite' }) !== 'granted') {
+         throw new Error('Permission denied to write to file.');
+      }
+    }
+    const blob = await createDuckDawPackage();
+    const writable = await (handle as any).createWritable();
+    await writable.write(blob);
+    await writable.close();
+    store.setDirty(false);
+  }
+}
+
+export async function openProject() {
+  if (!('showOpenFilePicker' in window)) {
+     // User has to use the old generic SettingsModal import
+     throw new Error('File handling not supported in this browser. Please use Settings dialog.');
+  }
+  
+  let handles;
+  try {
+    handles = await (window as any).showOpenFilePicker({
+      types: [{
+        description: 'DuckDAW Project',
+        accept: { 'application/zip': ['.duckdaw', '.zip'], 'application/json': ['.json'] }
+      }],
+      multiple: false
+    });
+  } catch (e: any) {
+    if (e.name === 'AbortError') return false;
+    throw e;
+  }
+  
+  if (!handles || handles.length === 0) return false;
+  
+  const file = await handles[0].getFile();
+  let pkg;
+  if (file.name.endsWith('.json')) {
+    const text = await file.text();
+    const legacyProject = JSON.parse(text);
+    useDAWStore.getState().loadProject(legacyProject);
+    useDAWStore.getState().setProjectName(file.name.replace('.json', ''));
+  } else {
+    pkg = await loadDuckDawPackage(file);
+    useDAWStore.getState().loadProject(pkg.project);
+    useDAWStore.getState().setProjectName(pkg.manifest.name || file.name.replace('.duckdaw', ''));
+  }
+  
+  await idb.set(FILE_HANDLE_KEY, handles[0]);
+  useDAWStore.getState().setDirty(false);
+  return true;
 }
