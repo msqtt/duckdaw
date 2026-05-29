@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useDAWStore } from '../../store/dawStore';
 import { Github, FileDown, FileUp, Moon, Sun, X } from 'lucide-react';
 import { Dropdown } from '../ui/Dropdown';
+import { createDuckDawPackage, loadDuckDawPackage, saveToFileSystemAsDownload } from '../../lib/projectStorage';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { 
@@ -9,34 +10,37 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   } = useDAWStore();
   const [githubToken, setGithubToken] = useState(localStorage.getItem('github_token') || '');
   const [githubRepo, setGithubRepo] = useState(localStorage.getItem('github_repo') || '');
-  const [githubPath, setGithubPath] = useState(localStorage.getItem('github_path') || 'webdaw_project.json');
+  const [githubPath, setGithubPath] = useState(localStorage.getItem('github_path') || 'webdaw_project.duckdaw');
 
-  const handleExportLocal = () => {
-    const data = getProjectData();
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "webdaw_project.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+  const handleExportLocal = async () => {
+    try {
+      const blob = await createDuckDawPackage('My DuckDAW Project');
+      await saveToFileSystemAsDownload(blob, 'project.duckdaw');
+    } catch(err) {
+      alert("Failed to export project. " + err);
+    }
   };
 
-  const handleImportLocal = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportLocal = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        loadProject(json);
-        alert("Project loaded successfully!");
-        onClose();
-      } catch(err) {
-        alert("Failed to parse project file");
+    try {
+      if (file.name.endsWith('.duckdaw') || file.name.endsWith('.zip')) {
+        const pkg = await loadDuckDawPackage(file);
+        // Note: For full v1.1 compliance, we need a migration step. 
+        // We'll pass the whole object or project object directly.
+        loadProject(pkg.project); 
+      } else {
+        // Fallback for older JSON format
+         const text = await file.text();
+         const json = JSON.parse(text);
+         loadProject(json);
       }
-    };
-    reader.readAsText(file);
+      alert("Project loaded successfully!");
+      onClose();
+    } catch(err: any) {
+      alert("Failed to load project: " + err.message);
+    }
   };
 
   const saveGithubSettings = () => {
@@ -50,11 +54,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       alert("Please fill in token, repo (owner/repo), and path");
       return;
     }
+    if (!githubPath.endsWith('.duckdaw')) {
+      alert("Path must end with .duckdaw for packaging format");
+      return;
+    }
     saveGithubSettings();
 
     try {
-      const data = getProjectData();
-      const content = btoa(JSON.stringify(data, null, 2));
+      const blob = await createDuckDawPackage('My DuckDAW Project');
+      const arrayBuffer = await blob.arrayBuffer();
+      // base64 encode the ArrayBuffer
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binaryString = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binaryString += String.fromCharCode(uint8Array[i]);
+      }
+      const content = btoa(binaryString);
 
       // Get current SHA if file exists to update it
       let sha;
@@ -111,9 +126,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       if (res.ok) {
         const json = await res.json();
-        const content = atob(json.content);
-        const data = JSON.parse(content);
-        loadProject(data);
+        const base64Content = json.content;
+        
+        if (githubPath.endsWith('.json')) {
+           // Legacy load
+           const content = atob(base64Content);
+           const data = JSON.parse(content);
+           loadProject(data);
+        } else {
+           // DuckDAW load
+           const binaryString = atob(base64Content);
+           const len = binaryString.length;
+           const bytes = new Uint8Array(len);
+           for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+           }
+           const fileBlob = new Blob([bytes], { type: 'application/zip' });
+           const pkg = await loadDuckDawPackage(fileBlob);
+           loadProject(pkg.project);
+        }
+
         alert("Project loaded from GitHub successfully!");
         onClose();
       } else {
@@ -181,7 +213,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
               <label className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors cursor-pointer">
                 <FileUp size={16} /> Load File
-                <input type="file" accept=".json" className="hidden" onChange={handleImportLocal} />
+                <input type="file" accept=".json,.duckdaw,.zip" className="hidden" onChange={handleImportLocal} />
               </label>
             </div>
           </div>
