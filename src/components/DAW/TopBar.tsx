@@ -7,13 +7,21 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
-import { saveProject, openProject } from '../../lib/projectStorage';
+import { saveProject, openProject, getRecentProjects, openRecentProject, RecentProject, saveAsTemplate, getTemplates, openTemplate, ProjectTemplate } from '../../lib/projectStorage';
 import toast from 'react-hot-toast';
 
 import { useShallow } from 'zustand/react/shallow';
 
 export function TopBar() {
-  const { projectName, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome } = useDAWStore(useShallow(state => ({
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+
+  useEffect(() => {
+    getRecentProjects().then(setRecentProjects).catch(console.error);
+    getTemplates().then(setTemplates).catch(console.error);
+  }, []);
+
+  const { projectName, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome, arrangements, activeArrangementId, setArrangement, addArrangement } = useDAWStore(useShallow(state => ({
       projectName: state.projectName,
       isDirty: state.isDirty,
       isPlaying: state.isPlaying,
@@ -35,7 +43,11 @@ export function TopBar() {
       isLooping: state.isLooping,
       toggleLoop: state.toggleLoop,
       metronomeOn: state.metronomeOn,
-      toggleMetronome: state.toggleMetronome
+      toggleMetronome: state.toggleMetronome,
+      arrangements: state.arrangements,
+      activeArrangementId: state.activeArrangementId,
+      setArrangement: state.setArrangement,
+      addArrangement: state.addArrangement
   })));
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
@@ -138,9 +150,61 @@ export function TopBar() {
               { value: 'new', label: 'New Project (Reset)' },
               { value: 'open', label: 'Open... (Ctrl+O)' },
               { value: 'save', label: 'Save (Ctrl+S)' },
-              { value: 'save_as', label: 'Save As... (Ctrl+Shift+S)' }
+              { value: 'save_as', label: 'Save As... (Ctrl+Shift+S)' },
+              { value: 'save_template', label: 'Save as Template...' },
+              ...(templates.length > 0 ? [{ value: 'divider_tpl', label: '--- Templates ---' }] : []),
+              ...templates.map((tpl, i) => ({
+                value: `template_${i}`,
+                label: `New from: ${tpl.name}`,
+              })),
+              ...(recentProjects.length > 0 ? [{ value: 'divider_recent', label: '--- Recent Projects ---' }] : []),
+              ...recentProjects.map((rp, i) => ({
+                value: `recent_${i}`,
+                label: rp.name,
+              }))
             ]}
             onChange={async (val) => {
+              if (val === 'divider_recent' || val === 'divider_tpl') return;
+              if (typeof val === 'string' && val.startsWith('template_')) {
+                const idx = parseInt(val.replace('template_', ''), 10);
+                const tpl = templates[idx];
+                if (tpl) {
+                  try {
+                    await openTemplate(tpl.data);
+                    toast.success(`Created project from ${tpl.name}`);
+                  } catch (e: any) {
+                    toast.error(`Failed to load template: ${e.message}`);
+                  }
+                }
+                return;
+              }
+              if (val === 'save_template') {
+                 const name = window.prompt("Template Name:");
+                 if (name) {
+                    try {
+                        await saveAsTemplate(name, "User saved template.");
+                        toast.success("Template saved!");
+                        // Refresh templates
+                        getTemplates().then(setTemplates);
+                    } catch (e: any) {
+                        toast.error(`Failed to save template: ${e.message}`);
+                    }
+                 }
+                 return;
+              }
+              if (typeof val === 'string' && val.startsWith('recent_')) {
+                const idx = parseInt(val.replace('recent_', ''), 10);
+                const rp = recentProjects[idx];
+                if (rp) {
+                  try {
+                    await openRecentProject(rp.handle);
+                    toast.success('Recent project loaded');
+                  } catch (e: any) {
+                    toast.error(`Failed to load: ${e.message}`);
+                  }
+                }
+                return;
+              }
               if (val === 'save') {
                 try {
                   await saveProject(false);
@@ -182,6 +246,34 @@ export function TopBar() {
             {projectName}
             {isDirty && <span className="text-emerald-500 ml-1 font-bold">*</span>}
           </div>
+          <div className="h-4 w-px bg-neutral-300 dark:bg-neutral-700 mx-1" />
+          <Dropdown
+            align="left"
+            options={[
+              ...arrangements.map(a => ({ value: a.id, label: a.name })),
+              { value: 'divider', label: '---' },
+              { value: 'new', label: 'New Arrangement...' }
+            ]}
+            value={activeArrangementId || undefined}
+            onChange={(val) => {
+              if (val === 'divider') return;
+              if (val === 'new') {
+                const name = window.prompt("Arrangement name:", "Arrangement " + (arrangements.length + 1));
+                if (name) {
+                  addArrangement(name);
+                  // The new item will be the last one added, we won't switch it automatically unless we find it, but it's simpler to let the user pick it or we handle it.
+                }
+              } else {
+                setArrangement(val);
+              }
+            }}
+            trigger={
+              <div className="flex items-center gap-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 px-2 py-1 rounded transition-colors text-xs font-semibold cursor-pointer">
+                <span>{arrangements.find(a => a.id === activeArrangementId)?.name || 'Scene'}</span>
+                <ChevronDown size={12} className="opacity-70" />
+              </div>
+            }
+          />
         </div>
         
         {/* Transport Controls */}

@@ -106,10 +106,11 @@ export async function createDuckDawPackage(name?: string, description?: string):
       automationLanes: []
     })),
     clips: clips,
-    markers: [],
+    markers: store.markers,
     automation: [],
     tempoTrack: [{ position: 0, bpm: store.bpm, curve: 'linear' }],
-    arrangements: [{ id: crypto.randomUUID(), name: 'Main', clips: clips.map(c => c.id) }]
+    arrangements: store.arrangements.length > 0 ? store.arrangements : [{ id: crypto.randomUUID(), name: 'Main Arrangement', clips: clips.map(c => c.id) }],
+    activeArrangementId: store.activeArrangementId || 'main'
   };
 
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
@@ -163,7 +164,10 @@ export async function loadDuckDawPackage(file: File | Blob): Promise<ProjectPack
   const compatibleProject = {
      bpm: project.transport?.bpm || 120,
      tracks: project.tracks || [],
-     clips: project.clips || []
+     clips: project.clips || [],
+     markers: project.markers || [],
+     arrangements: project.arrangements && project.arrangements.length > 0 ? project.arrangements : [{ id: 'main', name: 'Main Arrangement' }],
+     activeArrangementId: project.activeArrangementId || 'main'
   };
 
   return {
@@ -187,6 +191,59 @@ export async function saveToFileSystemAsDownload(blob: Blob, name: string) {
 
 // File System Access API wrappers
 const FILE_HANDLE_KEY = 'duckdaw_current_file_handle';
+const RECENT_PROJECTS_KEY = 'duckdaw_recent_projects';
+const TEMPLATES_KEY = 'duckdaw_templates';
+
+export interface RecentProject {
+  name: string;
+  handle: any;
+  lastOpened: number;
+}
+
+export interface ProjectTemplate {
+  name: string;
+  description: string;
+  data: any; // the JSON package data or project data
+}
+
+export async function saveAsTemplate(name: string, description: string) {
+  const store = useDAWStore.getState();
+  const pkg = await createDuckDawPackage(name, description);
+  const buffer = await pkg.arrayBuffer();
+  
+  let templates = await idb.get<ProjectTemplate[]>(TEMPLATES_KEY) || [];
+  templates.push({ name, description, data: buffer });
+  await idb.set(TEMPLATES_KEY, templates);
+}
+
+export async function getTemplates(): Promise<ProjectTemplate[]> {
+  return await idb.get<ProjectTemplate[]>(TEMPLATES_KEY) || [];
+}
+
+export async function openTemplate(templateData: ArrayBuffer) {
+  const blob = new Blob([templateData], { type: 'application/zip' });
+  const file = new File([blob], 'template.duckdaw');
+  const pkg = await loadDuckDawPackage(file);
+  useDAWStore.getState().loadProject(pkg.project);
+  useDAWStore.getState().setProjectName(pkg.manifest.name || 'New Project');
+  useDAWStore.getState().setDirty(true);
+  
+  // Clear the active file handle so Ctrl+S prompts Save As
+  await idb.del(FILE_HANDLE_KEY);
+}
+
+export async function getRecentProjects(): Promise<RecentProject[]> {
+  const recents = await idb.get<RecentProject[]>(RECENT_PROJECTS_KEY);
+  return recents || [];
+}
+
+async function addToRecentProjects(name: string, handle: any) {
+  let recents = await getRecentProjects();
+  recents = recents.filter(r => r.name !== name);
+  recents.unshift({ name, handle, lastOpened: Date.now() });
+  if (recents.length > 10) recents = recents.slice(0, 10);
+  await idb.set(RECENT_PROJECTS_KEY, recents);
+}
 
 export async function saveProject(forceDialog = false, isAutoSave = false) {
   const store = useDAWStore.getState();
@@ -231,6 +288,7 @@ export async function saveProject(forceDialog = false, isAutoSave = false) {
     await writable.write(blob);
     await writable.close();
     store.setDirty(false);
+    await addToRecentProjects(store.projectName, handle);
   }
 }
 
@@ -271,5 +329,33 @@ export async function openProject() {
   
   await idb.set(FILE_HANDLE_KEY, handles[0]);
   useDAWStore.getState().setDirty(false);
+  await addToRecentProjects(useDAWStore.getState().projectName, handles[0]);
+  return true;
+}
+
+export async function openRecentProject(handle: any) {
+  // Check permission
+  if (await handle.queryPermission({ mode: 'read' }) !== 'granted') {
+    if (await handle.requestPermission({ mode: 'read' }) !== 'granted') {
+       throw new Error('Permission denied to read file.');
+    }
+  }
+  
+  const file = await handle.getFile();
+  let pkg;
+  if (file.name.endsWith('.json')) {
+    const text = await file.text();
+    const legacyProject = JSON.parse(text);
+    useDAWStore.getState().loadProject(legacyProject);
+    useDAWStore.getState().setProjectName(file.name.replace('.json', ''));
+  } else {
+    pkg = await loadDuckDawPackage(file);
+    useDAWStore.getState().loadProject(pkg.project);
+    useDAWStore.getState().setProjectName(pkg.manifest.name || file.name.replace('.duckdaw', ''));
+  }
+  
+  await idb.set(FILE_HANDLE_KEY, handle);
+  useDAWStore.getState().setDirty(false);
+  await addToRecentProjects(useDAWStore.getState().projectName, handle);
   return true;
 }

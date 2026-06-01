@@ -51,8 +51,23 @@ export interface Track {
   env?: EnvConfig;
 }
 
+export interface Marker {
+  id: string;
+  name: string;
+  position: number; // in beats
+  color: string;
+}
+
+export interface Arrangement {
+  id: string;
+  name: string;
+}
+
 interface DAWState {
   projectName: string;
+  markers: Marker[];
+  arrangements: Arrangement[];
+  activeArrangementId: string | null;
   bpm: number;
   timeSignature: [number, number];
   theme: ThemeMode;
@@ -127,6 +142,14 @@ interface DAWState {
   quantizeSelectedNotes: (clipId: string) => void;
   toggleRecording: () => void;
   toggleMicRecording: () => void;
+
+  // Markers & Arrangements
+  addMarker: (position: number, name?: string) => void;
+  updateMarker: (id: string, updates: Partial<Marker>) => void;
+  deleteMarker: (id: string) => void;
+  setArrangement: (id: string) => void;
+  addArrangement: (name: string) => void;
+  deleteArrangement: (id: string) => void;
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -139,6 +162,9 @@ export const dawStore = createStore<DAWState>()(
   temporal(
     (set, get) => ({
       projectName: 'My DuckDAW Project',
+      markers: [],
+      arrangements: [{ id: 'main', name: 'Main Arrangement' }],
+      activeArrangementId: 'main',
       bpm: 120,
       timeSignature: [4, 4],
       zoom: 20,
@@ -470,7 +496,30 @@ export const dawStore = createStore<DAWState>()(
         isDirty: true
       })),
       toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying })),
-      toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying }))
+      toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying })),
+      
+      addMarker: (position, name = 'Marker') => set((state) => ({
+        markers: [...state.markers, { id: generateId(), name, position, color: getRandomColor() }],
+        isDirty: true
+      })),
+      updateMarker: (id, updates) => set((state) => ({
+        markers: state.markers.map(m => m.id === id ? { ...m, ...updates } : m),
+        isDirty: true
+      })),
+      deleteMarker: (id) => set((state) => ({
+        markers: state.markers.filter(m => m.id !== id),
+        isDirty: true
+      })),
+      addArrangement: (name) => set((state) => ({
+        arrangements: [...state.arrangements, { id: generateId(), name }],
+        isDirty: true
+      })),
+      deleteArrangement: (id) => set((state) => ({
+        arrangements: state.arrangements.filter(a => a.id !== id),
+        activeArrangementId: state.activeArrangementId === id ? (state.arrangements.find(a => a.id !== id)?.id || null) : state.activeArrangementId,
+        isDirty: true
+      })),
+      setArrangement: (id) => set({ activeArrangementId: id, isDirty: true })
     }),
     {
       partialize: (state) => {

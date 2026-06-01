@@ -12,7 +12,7 @@ import { ClipItem, currentDragContext, setDragContext } from './ClipItem';
 import { useShallow } from 'zustand/react/shallow';
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop } = useDAWStore(useShallow(state => ({
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop, markers, addMarker, updateMarker, deleteMarker, activeArrangementId } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
       clips: state.clips,
       addTrack: state.addTrack,
@@ -32,7 +32,12 @@ export function ArrangeView() {
       loopEnd: state.loopEnd,
       setLoopRegion: state.setLoopRegion,
       isLooping: state.isLooping,
-      toggleLoop: state.toggleLoop
+      toggleLoop: state.toggleLoop,
+      markers: state.markers,
+      addMarker: state.addMarker,
+      updateMarker: state.updateMarker,
+      deleteMarker: state.deleteMarker,
+      activeArrangementId: state.activeArrangementId
   })));
   const PIXELS_PER_BEAT = zoom; 
   const SNAP = snapToGrid ? snapGridSize : 0.015625; 
@@ -409,6 +414,14 @@ export function ArrangeView() {
         <div 
           className="h-8 border-b border-neutral-300 dark:border-neutral-800 sticky top-0 z-40 flex text-xs text-neutral-500 overflow-visible cursor-crosshair bg-neutral-50 dark:bg-neutral-900"
           style={{ width: `${totalBeats * PIXELS_PER_BEAT}px` }}
+          onDoubleClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const beat = Math.max(0, clickX / PIXELS_PER_BEAT);
+              const snapped = Math.round(beat / SNAP) * SNAP;
+              addMarker(snapped, 'New Marker');
+              e.stopPropagation();
+          }}
           onPointerDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const startX = e.clientX - rect.left;
@@ -536,6 +549,30 @@ export function ArrangeView() {
               {i + 1}
             </div>
           ))}
+          
+          {/* Markers */}
+          {markers.map(marker => (
+             <div
+               key={marker.id}
+               className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-auto"
+               style={{ left: `${marker.position * PIXELS_PER_BEAT - 6}px` }}
+               onDoubleClick={(e) => { e.stopPropagation(); deleteMarker(marker.id); }}
+               onClick={(e) => {
+                 e.stopPropagation();
+                 const posStr = `0:${marker.position}:0`;
+                 if ((Tone as any).Transport && typeof (Tone as any).Transport.position !== 'undefined') {
+                     (Tone as any).Transport.position = posStr;
+                 }
+               }}
+             >
+               <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-transparent" style={{ borderTopColor: marker.color }} />
+               <div className="w-px flex-1" style={{ backgroundColor: marker.color }} />
+               <div className="absolute top-1 left-3 text-[10px] whitespace-nowrap bg-neutral-900 text-white px-1 rounded shadow-sm z-50 pointer-events-none" style={{ backgroundColor: marker.color }}>
+                 {marker.name}
+               </div>
+             </div>
+          ))}
+
           {/* Playhead handle */}
           <div id="playhead-handle" className="absolute top-0 bottom-0 pointer-events-none z-30" style={{ left: '0px' }}>
               <div 
