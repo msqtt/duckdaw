@@ -18,4 +18,8 @@ A cute, minimalist, browser-based Digital Audio Workstation. Make some noise dir
 4. Double-click the track lane to create a clip.
 5. Click the clip to open the Piano Roll and drop some notes! 🎹
 
+## 📚 Specifications
+
+Current product, functional, technical, project-format, and delivery specifications are indexed in [`docs/specs/README.md`](docs/specs/README.md). Documents directly under `docs/` are retained as historical design and verification records.
+
 *Happy Quacking! 🦆🎶*

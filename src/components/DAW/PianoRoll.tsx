@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Tone from 'tone';
-import { useDAWStore, Clip, Note } from '../../store/dawStore';
+import { dawStore, useDAWStore, Clip, Note } from '../../store/dawStore';
 
 const NOTES = ['B', 'A#', 'A', 'G#', 'G', 'F#', 'F', 'E', 'D#', 'D', 'C#', 'C'];
 const OCTAVES = [6, 5, 4, 3, 2, 1]; // From top to bottom
@@ -388,7 +388,9 @@ export function PianoRoll() {
                             const startX = e.clientX;
                             const startY = e.clientY;
                             const initialStart = note.start;
+                            const initialNote = note.note;
                             const initialKeyIndex = keyIndex;
+                            dawStore.temporal.getState().pause();
                             
                             const onMove = (moveEvent: PointerEvent) => {
                                 const diffX = moveEvent.clientX - startX;
@@ -410,6 +412,11 @@ export function PianoRoll() {
                             const onUp = () => {
                                 window.removeEventListener('pointermove', onMove);
                                 window.removeEventListener('pointerup', onUp);
+                                const currentClip = useDAWStore.getState().clips.find(candidate => candidate.id === clip.id);
+                                const finalNote = currentClip?.notes.find(candidate => candidate.id === note.id);
+                                updateNote(clip.id, note.id, { start: initialStart, note: initialNote });
+                                dawStore.temporal.getState().resume();
+                                if (finalNote) updateNote(clip.id, note.id, { start: finalNote.start, note: finalNote.note });
                             };
                             
                             window.addEventListener('pointermove', onMove);
@@ -423,6 +430,7 @@ export function PianoRoll() {
                                 e.currentTarget.setPointerCapture(e.pointerId);
                                 const startX = e.clientX;
                                 const initialDuration = note.duration;
+                                dawStore.temporal.getState().pause();
                                 
                                 const onMove = (moveEvent: PointerEvent) => {
                                     const diffX = moveEvent.clientX - startX;
@@ -435,7 +443,11 @@ export function PianoRoll() {
                                 const onUp = (upEvent: PointerEvent) => {
                                     window.removeEventListener('pointermove', onMove);
                                     window.removeEventListener('pointerup', onUp);
-                                    // Save the final duration
+                                    const currentClip = useDAWStore.getState().clips.find(candidate => candidate.id === clip.id);
+                                    const finalDuration = currentClip?.notes.find(candidate => candidate.id === note.id)?.duration ?? initialDuration;
+                                    updateNote(clip.id, note.id, { duration: initialDuration });
+                                    dawStore.temporal.getState().resume();
+                                    updateNote(clip.id, note.id, { duration: finalDuration });
                                     const diffX = upEvent.clientX - startX;
                                     const SNAP = useDAWStore.getState().snapToGrid ? useDAWStore.getState().snapGridSize : 0.015625;
                                     const diffBeats = Math.round((diffX / BEAT_WIDTH) / SNAP) * SNAP;

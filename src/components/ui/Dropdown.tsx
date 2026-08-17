@@ -47,8 +47,12 @@ export function Dropdown({
 
   return (
     <div className={`relative inline-flex text-left ${className}`} ref={containerRef}>
-      <div 
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
         className={disabled ? 'opacity-50 cursor-not-allowed select-none' : 'cursor-pointer select-none ' + triggerClassName}
       >
         {trigger ? trigger : (
@@ -57,11 +61,12 @@ export function Dropdown({
              <ChevronDown size={14} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
           </>
         )}
-      </div>
+      </button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            role="listbox"
             initial={{ opacity: 0, y: 5, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5, scale: 0.95 }}
@@ -71,6 +76,8 @@ export function Dropdown({
             <div className="py-1 p-1 flex flex-col gap-0.5 max-h-64 overflow-y-auto custom-scrollbar">
               {options.map((option) => (
                 <button
+                  role="option"
+                  aria-selected={value === option.value}
                   key={option.value.toString()}
                   onClick={() => {
                     onChange?.(option.value);

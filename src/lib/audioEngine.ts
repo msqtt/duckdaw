@@ -1,6 +1,8 @@
 import * as Tone from 'tone';
 import { Clip, Track } from '../store/dawStore';
+import { beatsToTransportPosition, type TimeSignature } from './time';
 import { MicRecorder } from './recorder';
+import { createTrackMixSettings } from './mixSettings';
 
 class AudioEngine {
   synths: Map<string, Tone.PolySynth | Tone.Sampler>;
@@ -15,6 +17,7 @@ class AudioEngine {
   metronomeLoop: Tone.Loop | null = null;
   masterMeter: Tone.Meter | null = null;
   micRecorder: MicRecorder;
+  timeSignature: TimeSignature;
   
   constructor() {
     this.synths = new Map();
@@ -25,6 +28,7 @@ class AudioEngine {
     this.reverbs = new Map();
     this.delays = new Map();
     this.micRecorder = new MicRecorder();
+    this.timeSignature = [4, 4];
     
     this.masterMeter = new Tone.Meter();
     Tone.Destination.connect(this.masterMeter);
@@ -36,8 +40,6 @@ class AudioEngine {
 
   async initialize() {
     await Tone.start();
-    Tone.Transport.bpm.value = 120;
-    Tone.Transport.loop = false;
     
     if (!this.metronome) {
         this.metronome = new Tone.MembraneSynth({ pitchDecay: 0.008, envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 } }).toDestination();
@@ -54,6 +56,11 @@ class AudioEngine {
 
   setBpm(bpm: number) {
     Tone.Transport.bpm.value = bpm;
+  }
+
+  setTimeSignature(timeSignature: TimeSignature) {
+    this.timeSignature = timeSignature;
+    Tone.Transport.timeSignature = timeSignature;
   }
 
   setMetronome(enabled: boolean, sound: string = 'click', volume: number = 0.8, subdivisions: number = 1) {
@@ -127,14 +134,8 @@ class AudioEngine {
 
   setLoop(enabled: boolean, startBeat: number, endBeat: number) {
      Tone.Transport.loop = enabled;
-     // Convert beats to bars:beats:sixteenths
-     const startM = Math.floor(startBeat / 4);
-     const startB = startBeat % 4;
-     Tone.Transport.loopStart = `${startM}:${startB}:0`;
-     
-     const endM = Math.floor(endBeat / 4);
-     const endB = endBeat % 4;
-     Tone.Transport.loopEnd = `${endM}:${endB}:0`;
+     Tone.Transport.loopStart = beatsToTransportPosition(startBeat, this.timeSignature);
+     Tone.Transport.loopEnd = beatsToTransportPosition(endBeat, this.timeSignature);
   }
 
   play() {
@@ -158,9 +159,25 @@ class AudioEngine {
   }
   
   syncTracks(tracks: Track[]) {
+    const activeTrackIds = new Set(tracks.map(track => track.id));
+    for (const trackId of this.channels.keys()) {
+      if (activeTrackIds.has(trackId)) continue;
+      this.synths.get(trackId)?.dispose();
+      this.channels.get(trackId)?.dispose();
+      this.meters.get(trackId)?.dispose();
+      this.reverbs.get(trackId)?.dispose();
+      this.delays.get(trackId)?.dispose();
+      this.synths.delete(trackId);
+      this.channels.delete(trackId);
+      this.meters.delete(trackId);
+      this.reverbs.delete(trackId);
+      this.delays.delete(trackId);
+    }
+
     tracks.forEach(track => {
+      const mix = createTrackMixSettings(track);
       if (!this.channels.has(track.id)) {
-        const channel = new Tone.Channel().toDestination();
+        const channel = new Tone.Channel();
         const meter = new Tone.Meter();
         
         const reverb = new Tone.Reverb(2);
@@ -169,7 +186,7 @@ class AudioEngine {
         reverb.wet.value = 0;
         delay.wet.value = 0;
         
-        channel.chain(delay, reverb, meter);
+        channel.chain(delay, reverb, meter, Tone.Destination);
         
         this.channels.set(track.id, channel);
         this.meters.set(track.id, meter);
@@ -178,9 +195,9 @@ class AudioEngine {
       }
       
       const reverb = this.reverbs.get(track.id);
-      if (reverb) reverb.wet.value = track.reverb || 0;
+      if (reverb) reverb.wet.value = mix.reverbWet;
       const delay = this.delays.get(track.id);
-      if (delay) delay.wet.value = track.delay || 0;
+      if (delay) delay.wet.value = mix.delayWet;
       
       if (track.type === 'midi' && !this.synths.has(track.id)) {
         let synth;
@@ -222,10 +239,10 @@ class AudioEngine {
       }
       
       const channel = this.channels.get(track.id)!;
-      channel.volume.value = track.volume === 0 ? -Infinity : 20 * Math.log10(track.volume);
-      channel.pan.value = track.pan;
-      channel.mute = track.isMuted;
-      channel.solo = track.isSolo;
+      channel.volume.value = mix.volumeDb;
+      channel.pan.value = mix.pan;
+      channel.mute = mix.muted;
+      channel.solo = mix.solo;
     });
   }
 
@@ -237,10 +254,7 @@ class AudioEngine {
     this.audioPlayers.clear();
 
     clips.forEach(clip => {
-      // Calculate clip start in transport time
-      const startMeasure = Math.floor(clip.start / 4);
-      const startBeat = clip.start % 4;
-      const startTime = `${startMeasure}:${startBeat}:0`;
+      const startTime = beatsToTransportPosition(clip.start, this.timeSignature);
 
       if (clip.type === 'midi' && clip.notes) {
         const synth = this.synths.get(clip.trackId);

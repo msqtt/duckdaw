@@ -7,7 +7,7 @@ import { engine } from '../../lib/audioEngine';
 import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
-import { saveProject, openProject, getRecentProjects, openRecentProject, RecentProject, saveAsTemplate, getTemplates, openTemplate, ProjectTemplate } from '../../lib/projectStorage';
+import { createNewProject, deleteTemplate, saveProject, openProject, getRecentProjects, openRecentProject, RecentProject, saveAsTemplate, getTemplates, openTemplate, ProjectTemplate } from '../../lib/projectStorage';
 import toast from 'react-hot-toast';
 
 import { useShallow } from 'zustand/react/shallow';
@@ -17,12 +17,14 @@ export function TopBar() {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
 
   useEffect(() => {
-    getRecentProjects().then(setRecentProjects).catch(console.error);
-    getTemplates().then(setTemplates).catch(console.error);
+    getRecentProjects().then(setRecentProjects).catch(error => toast.error(`Failed to load recent projects: ${error instanceof Error ? error.message : String(error)}`));
+    getTemplates().then(setTemplates).catch(error => toast.error(`Failed to load templates: ${error instanceof Error ? error.message : String(error)}`));
   }, []);
 
-  const { projectName, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome, arrangements, activeArrangementId, setArrangement, addArrangement } = useDAWStore(useShallow(state => ({
+  const { projectName, tracks, selectedTrackId, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, snapToGrid, setSnapToGrid, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome, arrangements, activeArrangementId, setArrangement, addArrangement, deleteArrangement } = useDAWStore(useShallow(state => ({
       projectName: state.projectName,
+      tracks: state.tracks,
+      selectedTrackId: state.selectedTrackId,
       isDirty: state.isDirty,
       isPlaying: state.isPlaying,
       isRecording: state.isRecording,
@@ -35,6 +37,8 @@ export function TopBar() {
       setBpm: state.setBpm,
       timeSignature: state.timeSignature,
       setTimeSignature: state.setTimeSignature,
+      snapToGrid: state.snapToGrid,
+      setSnapToGrid: state.setSnapToGrid,
       bottomPanel: state.bottomPanel,
       setBottomPanel: state.setBottomPanel,
       theme: state.theme,
@@ -47,8 +51,13 @@ export function TopBar() {
       arrangements: state.arrangements,
       activeArrangementId: state.activeArrangementId,
       setArrangement: state.setArrangement,
-      addArrangement: state.addArrangement
+      addArrangement: state.addArrangement,
+      deleteArrangement: state.deleteArrangement
   })));
+
+  const selectedTrack = tracks.find(track => track.id === selectedTrackId);
+  const canRecordMidi = selectedTrack?.type === 'midi';
+  const canRecordMic = selectedTrack?.type === 'audio';
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
   const [showSettings, setShowSettings] = useState(false);
@@ -157,6 +166,10 @@ export function TopBar() {
                 value: `template_${i}`,
                 label: `New from: ${tpl.name}`,
               })),
+              ...templates.map((tpl, i) => ({
+                value: `delete_template_${i}`,
+                label: `Delete template: ${tpl.name}`,
+              })),
               ...(recentProjects.length > 0 ? [{ value: 'divider_recent', label: '--- Recent Projects ---' }] : []),
               ...recentProjects.map((rp, i) => ({
                 value: `recent_${i}`,
@@ -165,6 +178,13 @@ export function TopBar() {
             ]}
             onChange={async (val) => {
               if (val === 'divider_recent' || val === 'divider_tpl') return;
+              if (typeof val === 'string' && val.startsWith('delete_template_')) {
+                const idx = parseInt(val.replace('delete_template_', ''), 10);
+                await deleteTemplate(idx);
+                setTemplates(await getTemplates());
+                toast.success('Template deleted');
+                return;
+              }
               if (typeof val === 'string' && val.startsWith('template_')) {
                 const idx = parseInt(val.replace('template_', ''), 10);
                 const tpl = templates[idx];
@@ -207,15 +227,15 @@ export function TopBar() {
               }
               if (val === 'save') {
                 try {
-                  await saveProject(false);
-                  toast.success('Project saved');
+                  const result = await saveProject(false);
+                  if (result === 'saved' || result === 'downloaded') toast.success('Project saved');
                 } catch (e: any) {
                   toast.error(e.message);
                 }
               } else if (val === 'save_as') {
                 try {
-                  await saveProject(true);
-                  toast.success('Project saved as new file');
+                  const result = await saveProject(true);
+                  if (result === 'saved' || result === 'downloaded') toast.success('Project saved as new file');
                 } catch (e: any) {
                   toast.error(e.message);
                 }
@@ -227,9 +247,9 @@ export function TopBar() {
                   toast.error(e.message);
                 }
               } else if (val === 'new') {
-                useDAWStore.getState().loadProject({ bpm: 120, tracks: [], clips: [] });
-                useDAWStore.getState().setProjectName('New Project');
-                toast.success('New project created');
+                if (await createNewProject()) {
+                  toast.success('New project created');
+                }
               }
             }}
             trigger={
@@ -252,16 +272,23 @@ export function TopBar() {
             options={[
               ...arrangements.map(a => ({ value: a.id, label: a.name })),
               { value: 'divider', label: '---' },
-              { value: 'new', label: 'New Arrangement...' }
+              { value: 'new', label: 'New Arrangement...' },
+              ...(arrangements.length > 1 ? [{ value: 'delete_current', label: 'Delete Current Arrangement' }] : [])
             ]}
             value={activeArrangementId || undefined}
             onChange={(val) => {
               if (val === 'divider') return;
+              if (val === 'delete_current') {
+                if (activeArrangementId && window.confirm('Delete the current arrangement and all of its clips?')) {
+                  deleteArrangement(activeArrangementId);
+                }
+                return;
+              }
               if (val === 'new') {
                 const name = window.prompt("Arrangement name:", "Arrangement " + (arrangements.length + 1));
                 if (name) {
-                  addArrangement(name);
-                  // The new item will be the last one added, we won't switch it automatically unless we find it, but it's simpler to let the user pick it or we handle it.
+                  const copyCurrent = window.confirm('Copy clips from the current arrangement? Choose Cancel for an empty arrangement.');
+                  addArrangement(name, copyCurrent);
                 }
               } else {
                 setArrangement(val);
@@ -283,6 +310,7 @@ export function TopBar() {
             onClick={() => undo()}
             disabled={pastStates.length === 0}
             title="Undo"
+            aria-label="Undo"
           >
             <Undo2 size={18} />
           </button>
@@ -291,6 +319,7 @@ export function TopBar() {
             onClick={() => redo()}
             disabled={futureStates.length === 0}
             title="Redo"
+            aria-label="Redo"
           >
             <Redo2 size={18} />
           </button>
@@ -299,27 +328,33 @@ export function TopBar() {
           
           <button 
             className="p-2 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors"
+            aria-label="Stop"
             onClick={handleStop}
           >
             <Square size={20} className="fill-neutral-600 dark:fill-neutral-300" />
           </button>
           <button 
             className={`p-2 rounded transition-colors ${isPlaying ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
             onClick={handlePlay}
           >
             <Play size={20} className={isPlaying ? 'fill-emerald-600 dark:fill-emerald-500' : 'fill-neutral-600 dark:fill-neutral-300'} />
           </button>
           <button 
-            className={`p-2 rounded transition-colors ${isRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            className={`p-2 rounded transition-colors ${isRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'} disabled:cursor-not-allowed disabled:opacity-40`}
             onClick={toggleRecording}
-            title="Record Midi"
+            disabled={!isRecording && !canRecordMidi}
+            title={isRecording ? 'Stop MIDI recording' : canRecordMidi ? 'Record MIDI on selected track' : 'Select a MIDI track to record'}
+            aria-label={isRecording ? 'Stop MIDI recording' : 'Start MIDI recording'}
           >
             <Circle size={20} className={isRecording ? 'fill-red-600 dark:fill-red-500' : 'fill-neutral-600 dark:fill-neutral-300'} />
           </button>
           <button 
-            className={`p-2 rounded transition-colors ${isMicRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            className={`p-2 rounded transition-colors ${isMicRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'} disabled:cursor-not-allowed disabled:opacity-40`}
             onClick={handleMicRecord}
-            title="Record Audio (Mic)"
+            disabled={!isMicRecording && !canRecordMic}
+            title={isMicRecording ? 'Stop microphone recording' : canRecordMic ? 'Record microphone on selected track' : 'Select an audio track to record'}
+            aria-label={isMicRecording ? 'Stop microphone recording' : 'Start microphone recording'}
           >
             <Mic size={20} className={isMicRecording ? 'stroke-red-600 dark:stroke-red-500 fill-red-600/20 dark:fill-red-500/20' : 'fill-neutral-600 dark:fill-neutral-300'} />
           </button>
@@ -328,17 +363,9 @@ export function TopBar() {
           
           <button 
             className={`p-2 rounded transition-colors ${isLooping ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-            onClick={() => {
-                toggleLoop();
-                if (!isLooping) {
-                   Tone.Transport.loop = true;
-                   Tone.Transport.loopStart = "0:0:0"; 
-                   Tone.Transport.loopEnd = "4:0:0"; // 4 bars basic snap implementation, fix in AudioEngine later
-                } else {
-                   Tone.Transport.loop = false;
-                }
-            }}
+            onClick={toggleLoop}
             title="Cycle Mode"
+            aria-label="Toggle cycle mode"
           >
             <Repeat size={18} />
           </button>
@@ -354,6 +381,7 @@ export function TopBar() {
               className={`p-2 rounded transition-colors ${metronomeOn ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
               onClick={toggleMetronome}
               title="Metronome (Right click for settings)"
+              aria-label="Toggle metronome"
             >
               <Bell size={18} />
             </button>
@@ -457,12 +485,15 @@ export function TopBar() {
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
           <div className="flex items-center gap-1.5">
-             <div 
-                className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded transition-colors text-emerald-500 bg-emerald-500/10 cursor-default select-none`}
-                title="Grid snap is always on"
+             <button
+                type="button"
+                className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded transition-colors ${snapToGrid ? 'text-emerald-500 bg-emerald-500/10' : 'text-neutral-500 bg-neutral-500/10'}`}
+                title="Toggle grid snapping"
+                aria-label="Toggle grid snapping"
+                onClick={() => setSnapToGrid(!snapToGrid)}
              >
                  Grid
-             </div>
+             </button>
              <Dropdown
                options={gridSnapOptions}
                value={useDAWStore.getState().snapGridSize}
@@ -485,6 +516,7 @@ export function TopBar() {
         <div className="flex items-center bg-neutral-200 dark:bg-neutral-800 rounded-md p-1 mr-2">
             <button 
                 title="Toggle Piano Roll"
+                aria-label="Toggle piano roll"
                 className={`p-1.5 rounded transition-colors ${bottomPanel === 'piano-roll' ? 'bg-neutral-400 dark:bg-neutral-600 text-neutral-900 dark:text-white' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400'}`}
                 onClick={() => setBottomPanel(bottomPanel === 'piano-roll' ? null : 'piano-roll')}
             >
@@ -492,6 +524,7 @@ export function TopBar() {
             </button>
             <button 
                 title="Toggle Mixer"
+                aria-label="Toggle mixer"
                 className={`p-1.5 rounded transition-colors ${bottomPanel === 'mixer' ? 'bg-neutral-400 dark:bg-neutral-600 text-neutral-900 dark:text-white' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400'}`}
                 onClick={() => setBottomPanel(bottomPanel === 'mixer' ? null : 'mixer')}
             >

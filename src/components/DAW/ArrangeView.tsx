@@ -3,6 +3,8 @@ import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic, ChevronL
 import React, { useRef, useState, useEffect } from 'react';
 import * as Tone from 'tone';
 import { Dropdown } from '../ui/Dropdown';
+import toast from 'react-hot-toast';
+import { beatsToTransportPosition } from '../../lib/time';
 import { ConfirmModal } from '../ui/ConfirmModal';
 
 const SNAP_TO_BEAT = 1; // 1 beat
@@ -12,7 +14,7 @@ import { ClipItem, currentDragContext, setDragContext } from './ClipItem';
 import { useShallow } from 'zustand/react/shallow';
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop, markers, addMarker, updateMarker, deleteMarker, activeArrangementId } = useDAWStore(useShallow(state => ({
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, timeSignature, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop, markers, addMarker, updateMarker, deleteMarker, activeArrangementId } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
       clips: state.clips,
       addTrack: state.addTrack,
@@ -28,6 +30,7 @@ export function ArrangeView() {
       deleteTrack: state.deleteTrack,
       snapGridSize: state.snapGridSize,
       snapToGrid: state.snapToGrid,
+      timeSignature: state.timeSignature,
       loopStart: state.loopStart,
       loopEnd: state.loopEnd,
       setLoopRegion: state.setLoopRegion,
@@ -39,7 +42,8 @@ export function ArrangeView() {
       deleteMarker: state.deleteMarker,
       activeArrangementId: state.activeArrangementId
   })));
-  const PIXELS_PER_BEAT = zoom; 
+  const PIXELS_PER_BEAT = zoom;
+  const activeClips = clips.filter(clip => clip.arrangementId === activeArrangementId);
   const SNAP = snapToGrid ? snapGridSize : 0.015625; 
   const VISUAL_SNAP = snapGridSize;
   const totalBeats = 1000; // Large timeline
@@ -83,7 +87,7 @@ export function ArrangeView() {
       addClip(trackId, beat);
   };
 
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, trackId?: string, beat?: number, clipId?: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, trackId?: string, beat?: number, clipId?: string, markerId?: string } | null>(null);
 
   const contextMenuRef = useRef<HTMLDivElement>(null);
   
@@ -136,7 +140,7 @@ export function ArrangeView() {
           const trackTop = i * TRACK_HEIGHT;
           const trackBottom = trackTop + TRACK_HEIGHT;
           if (bottom >= trackTop && top <= trackBottom) {
-              const trackClips = clips.filter(c => c.trackId === t.id);
+              const trackClips = activeClips.filter(c => c.trackId === t.id);
               trackClips.forEach(c => {
                   const clipLeft = c.start * PIXELS_PER_BEAT;
                   const clipRight = clipLeft + c.duration * PIXELS_PER_BEAT;
@@ -209,15 +213,18 @@ export function ArrangeView() {
                  targetTrack = state.tracks[state.tracks.length - 1]; // Assume last track
               }
               if (targetTrack) {
-                 useDAWStore.getState().addClip(targetTrack.id, beat, bufferUrl, durationBeats);
+                 useDAWStore.getState().addClip(targetTrack.id, beat, bufferUrl, durationBeats, file.type);
                  const newState = useDAWStore.getState();
                  const newClipId = newState.selectedClipIds[newState.selectedClipIds.length - 1];
                  if (newClipId) {
                      updateClip(newClipId, { name: file.name });
                  }
               }
-          } catch(err) {
-              console.error("Failed decoding dropped audio", err);
+          } catch(error) {
+              URL.revokeObjectURL(bufferUrl);
+              toast.error(`Audio decode failed: ${error instanceof Error ? error.message : String(error)}`);
+          } finally {
+              void ctx.close();
           }
           return;
       }
@@ -449,7 +456,7 @@ export function ArrangeView() {
                      const beat = Math.max(0, clickX / PIXELS_PER_BEAT);
                      // Set playback position
                      const snapped = Math.round(beat / SNAP) * SNAP;
-                     Tone.Transport.position = `0:${snapped}:0`;
+                     Tone.Transport.position = beatsToTransportPosition(snapped, timeSignature);
                   }
               };
 
@@ -556,10 +563,19 @@ export function ArrangeView() {
                key={marker.id}
                className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-auto"
                style={{ left: `${marker.position * PIXELS_PER_BEAT - 6}px` }}
-               onDoubleClick={(e) => { e.stopPropagation(); deleteMarker(marker.id); }}
+               onDoubleClick={(event) => {
+                 event.stopPropagation();
+                 const name = window.prompt('Marker name:', marker.name);
+                 if (name?.trim()) updateMarker(marker.id, { name: name.trim() });
+               }}
+               onContextMenu={(event) => {
+                 event.preventDefault();
+                 event.stopPropagation();
+                 setContextMenu({ x: event.clientX, y: event.clientY, markerId: marker.id });
+               }}
                onClick={(e) => {
                  e.stopPropagation();
-                 const posStr = `0:${marker.position}:0`;
+                 const posStr = beatsToTransportPosition(marker.position, timeSignature);
                  if ((Tone as any).Transport && typeof (Tone as any).Transport.position !== 'undefined') {
                      (Tone as any).Transport.position = posStr;
                  }
@@ -588,7 +604,7 @@ export function ArrangeView() {
                          const x = moveEvent.clientX - rect.left + container.scrollLeft;
                          const beat = Math.max(0, x / PIXELS_PER_BEAT);
                          const snapped = Math.round(beat / SNAP) * SNAP;
-                         Tone.Transport.position = `0:${snapped}:0`;
+                         Tone.Transport.position = beatsToTransportPosition(snapped, timeSignature);
                       };
                       const onUp = (upEvent: PointerEvent) => {
                          window.removeEventListener('pointermove', onMove);
@@ -637,7 +653,7 @@ export function ArrangeView() {
                         }}
                     />
                 )}
-                {clips.filter(c => c.trackId === t.id).map(c => (
+                {activeClips.filter(c => c.trackId === t.id).map(c => (
                     <ClipItem 
                         key={c.id} 
                         clip={c} 
@@ -664,7 +680,42 @@ export function ArrangeView() {
                 onPointerDown={(e) => e.stopPropagation()}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
             >
-                {contextMenu.clipId ? (
+                {contextMenu.markerId ? (
+                    <>
+                        <button
+                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                            onPointerDown={(event) => {
+                                event.stopPropagation();
+                                const marker = markers.find(candidate => candidate.id === contextMenu.markerId);
+                                const name = window.prompt('Marker name:', marker?.name ?? 'Marker');
+                                if (name?.trim()) updateMarker(contextMenu.markerId!, { name: name.trim() });
+                                setContextMenu(null);
+                            }}
+                        >
+                            Rename
+                        </button>
+                        <label className="flex items-center justify-between gap-3 px-4 py-1.5 hover:bg-emerald-500 hover:text-white cursor-pointer">
+                            Color
+                            <input
+                                type="color"
+                                aria-label="Marker color"
+                                value={markers.find(marker => marker.id === contextMenu.markerId)?.color ?? '#22c55e'}
+                                onChange={(event) => updateMarker(contextMenu.markerId!, { color: event.target.value })}
+                                className="w-6 h-5"
+                            />
+                        </label>
+                        <button
+                            className="w-full text-left px-4 py-1.5 text-red-500 hover:bg-red-500 hover:text-white"
+                            onPointerDown={(event) => {
+                                event.stopPropagation();
+                                deleteMarker(contextMenu.markerId!);
+                                setContextMenu(null);
+                            }}
+                        >
+                            Delete
+                        </button>
+                    </>
+                ) : contextMenu.clipId ? (
                     <>
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
@@ -718,14 +769,17 @@ export function ArrangeView() {
                                                 const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
                                                 const durationSecs = audioBuffer.duration;
                                                 const durationBeats = (durationSecs / 60) * useDAWStore.getState().bpm;
-                                                addClip(contextMenu.trackId!, contextMenu.beat!, url, durationBeats);
+                                                addClip(contextMenu.trackId!, contextMenu.beat!, url, durationBeats, file.type);
                                                 const newState = useDAWStore.getState();
                                                 const newClipId = newState.selectedClipIds[newState.selectedClipIds.length - 1];
                                                 if (newClipId) {
                                                     updateClip(newClipId, { name: file.name });
                                                 }
-                                            } catch (err) {
-                                                addClip(contextMenu.trackId!, contextMenu.beat!, url);
+                                            } catch (error) {
+                                                URL.revokeObjectURL(url);
+                                                toast.error(`Audio decode failed: ${error instanceof Error ? error.message : String(error)}`);
+                                            } finally {
+                                                void ctx.close();
                                             }
                                             setContextMenu(null);
                                         }

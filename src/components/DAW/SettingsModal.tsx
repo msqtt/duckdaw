@@ -1,67 +1,78 @@
 import React, { useState } from 'react';
-import { useDAWStore } from '../../store/dawStore';
+import { dawStore, useDAWStore } from '../../store/dawStore';
 import { Github, FileDown, FileUp, Moon, Sun, X } from 'lucide-react';
 import { Dropdown } from '../ui/Dropdown';
-import { createDuckDawPackage, loadDuckDawPackage, saveToFileSystemAsDownload } from '../../lib/projectStorage';
+import { createDuckDawPackage, loadDuckDawPackage, saveToFileSystemAsDownload, confirmDiscardChanges, validatePersistedProjectState } from '../../lib/projectStorage';
+import toast from 'react-hot-toast';
 
+
+function buildGitHubContentsUrl(repo: string, path: string): string {
+  const [owner, repository, ...extra] = repo.split('/');
+  if (!owner || !repository || extra.length > 0) throw new Error('Repository must use owner/repo format');
+  const encodedPath = path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  if (!encodedPath) throw new Error('GitHub file path is required');
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/contents/${encodedPath}`;
+}
 export function SettingsModal({ onClose }: { onClose: () => void }) {
+  const titleId = React.useId();
   const { 
     theme, toggleTheme, getProjectData, loadProject
   } = useDAWStore();
-  const [githubToken, setGithubToken] = useState(localStorage.getItem('github_token') || '');
+  const [githubToken, setGithubToken] = useState(sessionStorage.getItem('github_token') || '');
   const [githubRepo, setGithubRepo] = useState(localStorage.getItem('github_repo') || '');
   const [githubPath, setGithubPath] = useState(localStorage.getItem('github_path') || 'webdaw_project.duckdaw');
 
   const handleExportLocal = async () => {
     try {
-      const blob = await createDuckDawPackage('My DuckDAW Project');
+      const blob = await createDuckDawPackage();
       await saveToFileSystemAsDownload(blob, 'project.duckdaw');
-    } catch(err) {
-      alert("Failed to export project. " + err);
+    } catch(error) {
+      toast.error(`Failed to export project: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   const handleImportLocal = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !confirmDiscardChanges()) return;
     try {
       if (file.name.endsWith('.duckdaw') || file.name.endsWith('.zip')) {
         const pkg = await loadDuckDawPackage(file);
-        // Note: For full v1.1 compliance, we need a migration step. 
-        // We'll pass the whole object or project object directly.
         loadProject(pkg.project); 
       } else {
-        // Fallback for older JSON format
-         const text = await file.text();
-         const json = JSON.parse(text);
-         loadProject(json);
+        const text = await file.text();
+        const json = JSON.parse(text);
+        validatePersistedProjectState(json);
+        loadProject(json);
+        useDAWStore.getState().setDirty(true);
       }
-      alert("Project loaded successfully!");
+      dawStore.temporal.getState().clear();
+      toast.success('Project loaded successfully');
       onClose();
-    } catch(err: any) {
-      alert("Failed to load project: " + err.message);
+    } catch(error) {
+      toast.error(`Failed to load project: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   const saveGithubSettings = () => {
-    localStorage.setItem('github_token', githubToken);
+    sessionStorage.setItem('github_token', githubToken);
     localStorage.setItem('github_repo', githubRepo);
     localStorage.setItem('github_path', githubPath);
   };
 
   const handleGithubSave = async () => {
     if (!githubToken || !githubRepo || !githubPath) {
-      alert("Please fill in token, repo (owner/repo), and path");
+      toast.error('Please fill in token, repo (owner/repo), and path');
       return;
     }
     if (!githubPath.endsWith('.duckdaw')) {
-      alert("Path must end with .duckdaw for packaging format");
+      toast.error('Path must end with .duckdaw for packaging format');
       return;
     }
     saveGithubSettings();
 
     try {
-      const blob = await createDuckDawPackage('My DuckDAW Project');
+      const githubUrl = buildGitHubContentsUrl(githubRepo, githubPath);
+      const blob = await createDuckDawPackage();
       const arrayBuffer = await blob.arrayBuffer();
       // base64 encode the ArrayBuffer
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -73,7 +84,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
       // Get current SHA if file exists to update it
       let sha;
-      const getRes = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${githubPath}`, {
+      const getRes = await fetch(githubUrl, {
         headers: {
           'Authorization': `token ${githubToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -84,7 +95,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         sha = json.sha;
       }
 
-      const res = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${githubPath}`, {
+      const res = await fetch(githubUrl, {
         method: 'PUT',
         headers: {
           'Authorization': `token ${githubToken}`,
@@ -99,25 +110,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       });
 
       if (res.ok) {
-        alert("Project saved to GitHub successfully!");
+        toast.success('Project saved to GitHub successfully');
       } else {
         const error = await res.json();
-        alert(`Failed: ${error.message}`);
+        if (res.status === 409) {
+          toast.error('GitHub conflict: the remote file changed. Reload it or save to a different path.');
+        } else {
+          toast.error(`GitHub save failed: ${error.message}`);
+        }
       }
-    } catch(err: any) {
-      alert(`Error saving to GitHub: ${err.message}`);
+    } catch(error) {
+      toast.error(`GitHub save failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   const handleGithubLoad = async () => {
     if (!githubToken || !githubRepo || !githubPath) {
-      alert("Please fill in token, repo (owner/repo), and path");
+      toast.error('Please fill in token, repo (owner/repo), and path');
       return;
     }
     saveGithubSettings();
 
     try {
-      const res = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${githubPath}`, {
+      const githubUrl = buildGitHubContentsUrl(githubRepo, githubPath);
+      const res = await fetch(githubUrl, {
         headers: {
           'Authorization': `token ${githubToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -125,6 +141,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       });
 
       if (res.ok) {
+        if (!confirmDiscardChanges()) return;
         const json = await res.json();
         const base64Content = json.content;
         
@@ -146,23 +163,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
            loadProject(pkg.project);
         }
 
-        alert("Project loaded from GitHub successfully!");
+        dawStore.temporal.getState().clear();
+        toast.success('Project loaded from GitHub successfully');
         onClose();
       } else {
         const error = await res.json();
-        alert(`Failed: ${error.message}`);
+        toast.error(`GitHub load failed: ${error.message}`);
       }
-    } catch(err: any) {
-      alert(`Error loading from GitHub: ${err.message}`);
+    } catch(error) {
+      toast.error(`GitHub load failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden text-neutral-800 dark:text-neutral-200">
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg shadow-xl w-full max-w-md flex flex-col overflow-hidden text-neutral-800 dark:text-neutral-200">
         <div className="flex items-center justify-between p-4 border-b border-neutral-300 dark:border-neutral-800">
-          <h2 className="text-lg font-bold">Settings</h2>
-          <button onClick={onClose} className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded">
+          <h2 id={titleId} className="text-lg font-bold">Settings</h2>
+          <button aria-label="Close settings" onClick={onClose} className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded">
             <X size={20} />
           </button>
         </div>
@@ -224,6 +242,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div className="space-y-2">
               <input 
                 type="password" 
+                aria-label="GitHub personal access token"
                 placeholder="Personal Access Token" 
                 value={githubToken} 
                 onChange={(e) => setGithubToken(e.target.value)}
@@ -231,6 +250,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               />
               <input 
                 type="text" 
+                aria-label="GitHub repository"
                 placeholder="Repository (e.g. user/repo)" 
                 value={githubRepo} 
                 onChange={(e) => setGithubRepo(e.target.value)}
@@ -238,6 +258,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               />
               <input 
                 type="text" 
+                aria-label="GitHub project file path"
                 placeholder="File Path (e.g. project.json)" 
                 value={githubPath} 
                 onChange={(e) => setGithubPath(e.target.value)}
@@ -258,8 +279,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                You need a <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Classic PAT</a> with `repo` scope to use GitHub sync. Your token is stored locally in your browser.
+                You need a <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-emerald-500 hover:underline">Classic PAT</a> with `repo` scope. The token is kept only for this browser session; avoid using it on untrusted pages.
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  sessionStorage.removeItem('github_token');
+                  setGithubToken('');
+                  toast.success('GitHub token cleared');
+                }}
+                className="text-xs text-red-500 hover:underline"
+              >
+                Clear GitHub token
+              </button>
             </div>
           </div>
         </div>

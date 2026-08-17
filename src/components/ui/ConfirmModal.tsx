@@ -23,6 +23,7 @@ export function ConfirmModal({
   cancelText = 'Cancel',
   isDestructive = true,
 }: ConfirmModalProps) {
+  const titleId = React.useId();
   return (
     <AnimatePresence>
       {isOpen && (
@@ -35,6 +36,9 @@ export function ConfirmModal({
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
           />
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -42,10 +46,11 @@ export function ConfirmModal({
             className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col"
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50">
-              <h2 className="text-sm font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-2">
+              <h2 id={titleId} className="text-sm font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-2">
                 {title}
               </h2>
               <button 
+                aria-label="Close confirmation dialog"
                 onClick={onClose}
                 className="text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
               >

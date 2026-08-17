@@ -3,21 +3,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
 import { TopBar } from './components/DAW/TopBar';
 import { ArrangeView } from './components/DAW/ArrangeView';
 import { PianoRoll } from './components/DAW/PianoRoll';
 import { Mixer } from './components/DAW/Mixer';
 import { ExportModal } from './components/DAW/ExportModal';
-import { useDAWStore } from './store/dawStore';
+import { dawStore, useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
-import { saveProject, openProject } from './lib/projectStorage';
+import { MidiCapture, connectMidiInputs } from './lib/midiInput';
+import { secondsToBeats, transportPositionToBeats } from './lib/time';
+import {
+  clearRecoverySnapshot,
+  getRecoverySnapshot,
+  openProject,
+  restoreRecoverySnapshot,
+  saveProject,
+  saveRecoverySnapshot,
+} from './lib/projectStorage';
 import toast, { Toaster } from 'react-hot-toast';
 
 export default function DAWApp() {
-  const { tracks, clips, togglePlay, stop, bottomPanel, bpm, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isMicRecording, isDirty } = useDAWStore();
+  const { tracks, clips, activeArrangementId, togglePlay, stop, bottomPanel, bpm, timeSignature, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isRecording, isMicRecording, isDirty } = useDAWStore();
   const [init, setInit] = useState(false);
+  const micRecordingStartBeat = useRef(0);
+  const micRecordingTrackId = useRef<string | null>(null);
+  const midiCapture = useRef(new MidiCapture());
+  const midiDisconnect = useRef<(() => void) | null>(null);
+  const midiRecordingTrackId = useRef<string | null>(null);
+  const midiRecordingStartBeat = useRef(0);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -37,6 +52,18 @@ export default function DAWApp() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       
       const state = useDAWStore.getState();
+
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
+        e.preventDefault();
+        if (e.shiftKey) dawStore.temporal.getState().redo();
+        else dawStore.temporal.getState().undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
+        e.preventDefault();
+        dawStore.temporal.getState().redo();
+        return;
+      }
 
       if (e.code === 'Space') {
         e.preventDefault();
@@ -113,10 +140,8 @@ export default function DAWApp() {
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
           e.preventDefault(); // Paste
           if (state.bottomPanel !== 'piano-roll' && state.clipboardClips.length > 0) {
-              // Paste clips
-              state.clipboardClips.forEach(clip => {
-                  state.duplicateClip(clip.id); // Simple duplication logic. In a real DAW, pastes at playhead.
-              });
+              const playheadBeat = Tone.Transport.ticks / Tone.Transport.PPQ;
+              state.pasteClips(playheadBeat);
           } else if (state.bottomPanel === 'piano-roll' && state.clipboardNotes.length > 0) {
               // Paste notes
               const currentClip = state.clips.find(c => c.id === state.selectedClipIds[0]);
@@ -139,8 +164,10 @@ export default function DAWApp() {
         e.preventDefault();
         try {
           const forceDialog = e.shiftKey;
-          await saveProject(forceDialog);
-          toast.success(forceDialog ? 'Project saved as new file' : 'Project saved');
+          const result = await saveProject(forceDialog);
+          if (result === 'saved' || result === 'downloaded') {
+            toast.success(forceDialog ? 'Project saved as new file' : 'Project saved');
+          }
         } catch (err: any) {
           toast.error(`Save failed: ${err.message}`);
         }
@@ -158,30 +185,73 @@ export default function DAWApp() {
     return () => window.removeEventListener('keydown', handleGlobalShortcuts);
   }, []);
 
-  // Autosave periodically
   useEffect(() => {
     let active = true;
-    const autosaveInterval = setInterval(async () => {
-      const state = useDAWStore.getState();
-      if (state.isDirty) {
-         try {
-            await saveProject(false, true);
-            if (active && document.visibilityState === 'visible') {
-                toast.success('Autosaved project');
-            }
-         } catch (err) {
-            console.error('Autosave failed:', err);
-         }
+    getRecoverySnapshot().then(async (snapshot) => {
+      if (!active || !snapshot) return;
+      const shouldRestore = window.confirm('A newer DuckDAW recovery snapshot is available. Restore it now?');
+      if (shouldRestore) {
+        await restoreRecoverySnapshot();
+        if (active) toast.success('Recovered autosaved project');
+        return;
       }
-    }, 3 * 60 * 1000); // 3 minutes
-    return () => { active = false; clearInterval(autosaveInterval); };
+      const shouldDiscard = window.confirm('Discard the recovery snapshot? Choose Cancel to keep it for later.');
+      if (shouldDiscard) await clearRecoverySnapshot();
+    }).catch((error) => {
+      if (active) toast.error(`Recovery check failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return () => { active = false; };
+  }, []);
+
+  // Save an independent recovery snapshot shortly after each persisted edit.
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = dawStore.subscribe((state, previous) => {
+      const persistedStateChanged = state.projectName !== previous.projectName
+        || state.bpm !== previous.bpm
+        || state.timeSignature !== previous.timeSignature
+        || state.isLooping !== previous.isLooping
+        || state.loopStart !== previous.loopStart
+        || state.loopEnd !== previous.loopEnd
+        || state.metronomeOn !== previous.metronomeOn
+        || state.metronomeSound !== previous.metronomeSound
+        || state.metronomeVolume !== previous.metronomeVolume
+        || state.metronomeSubdivisions !== previous.metronomeSubdivisions
+        || state.masterVolume !== previous.masterVolume
+        || state.tracks !== previous.tracks
+        || state.clips !== previous.clips
+        || state.markers !== previous.markers
+        || state.arrangements !== previous.arrangements
+        || state.activeArrangementId !== previous.activeArrangementId;
+      if (!state.isDirty || !persistedStateChanged) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        if (!dawStore.getState().isDirty) return;
+        try {
+          await saveRecoverySnapshot();
+        } catch (error) {
+          if (active) toast.error(`Autosave failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }, 2_000);
+    });
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
     // Sync state to audio engine
     engine.syncTracks(tracks);
-    engine.syncClips(clips);
-  }, [tracks, clips]);
+    engine.syncClips(clips.filter(clip => clip.arrangementId === activeArrangementId));
+  }, [tracks, clips, activeArrangementId]);
+
+  useEffect(() => {
+    engine.setBpm(bpm);
+    engine.setTimeSignature(timeSignature);
+  }, [bpm, timeSignature]);
 
   useEffect(() => {
     engine.setMetronome(metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions);
@@ -196,51 +266,107 @@ export default function DAWApp() {
   }, [isLooping, loopStart, loopEnd]);
 
   useEffect(() => {
+    const handleMidiRecording = async () => {
+      const state = useDAWStore.getState();
+      if (state.isRecording) {
+        const track = state.tracks.find(candidate => candidate.id === state.selectedTrackId);
+        if (!track || track.type !== 'midi') {
+          toast.error('Select a MIDI track before recording');
+          state.toggleRecording();
+          return;
+        }
+        const startBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
+        midiRecordingTrackId.current = track.id;
+        midiRecordingStartBeat.current = startBeat;
+        midiCapture.current.start(startBeat);
+        try {
+          midiDisconnect.current = await connectMidiInputs(data => {
+            const current = useDAWStore.getState();
+            const beat = transportPositionToBeats(Tone.Transport.position.toString(), current.timeSignature);
+            midiCapture.current.handleMessage(data, beat);
+          });
+          if (!state.isPlaying) {
+            engine.play();
+            state.togglePlay();
+          }
+        } catch (error) {
+          midiRecordingTrackId.current = null;
+          toast.error(`MIDI recording unavailable: ${error instanceof Error ? error.message : String(error)}`);
+          state.toggleRecording();
+        }
+      } else if (midiDisconnect.current) {
+        midiDisconnect.current();
+        midiDisconnect.current = null;
+        const endBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
+        const notes = midiCapture.current.stop(endBeat);
+        const trackId = midiRecordingTrackId.current;
+        midiRecordingTrackId.current = null;
+        if (trackId && notes.length > 0) {
+          state.commitMidiRecording(
+            trackId,
+            midiRecordingStartBeat.current,
+            Math.max(1 / 4, endBeat - midiRecordingStartBeat.current),
+            notes,
+          );
+        }
+      }
+    };
+    void handleMidiRecording();
+    return () => {
+      midiDisconnect.current?.();
+    };
+  }, [isRecording]);
+
+  useEffect(() => {
     const handleMicState = async () => {
       const state = useDAWStore.getState();
-      
+
       if (state.isMicRecording) {
-        // Start recording
+        const track = state.tracks.find(candidate => candidate.id === state.selectedTrackId);
+        if (!track || track.type !== 'audio') {
+          toast.error('Select an Audio track before recording');
+          state.toggleMicRecording();
+          return;
+        }
         try {
-          // Check permissions first to be safe
-          await navigator.mediaDevices.getUserMedia({ audio: true });
+          micRecordingTrackId.current = track.id;
+          micRecordingStartBeat.current = transportPositionToBeats(
+            Tone.Transport.position.toString(),
+            state.timeSignature,
+          );
           await engine.micRecorder.start();
           if (!state.isPlaying) {
              engine.play();
              state.togglePlay();
           }
-        } catch (e: any) {
-          console.error("Microphone access denied", e);
-          if (window.self !== window.top) {
-              alert("Microphone access denied. Please open the app in a new tab to use the microphone.");
-          } else {
-              alert("Microphone access denied: " + e.message);
-          }
-          state.toggleMicRecording(); // toggle back
+        } catch (error) {
+          micRecordingTrackId.current = null;
+          toast.error(`Microphone access failed: ${error instanceof Error ? error.message : String(error)}`);
+          state.toggleMicRecording();
         }
-      } else {
-        // Stop recording
-        if (engine.micRecorder.mediaRecorder && engine.micRecorder.mediaRecorder.state !== "inactive") {
-           const url = await engine.micRecorder.stop();
-           if (url && state.selectedTrackId) {
-               const track = state.tracks.find(t => t.id === state.selectedTrackId);
-               if (track && track.type === 'audio') {
-                   // Calculate current position in beats to snap it roughly
-                   const pos = Array.isArray(Tone.Transport.position) ? Tone.Transport.position[0] : parseInt(Tone.Transport.position.toString().split(':')[0]);
-                   // For now, let's just place it at 0 or position. Since we don't have exactly Tone.js position synced to record time perfectly, let's place it at loopStart or 0 for now.
-                   // A better way is Tone.Transport.position beats
-                   const parts = Tone.Transport.position.toString().split(':');
-                   const currentBeat = parseInt(parts[0]) * 4 + parseInt(parts[1]);
-                   state.addClip(state.selectedTrackId, currentBeat, url);
-               } else {
-                   alert("Please select an Audio track to place the recorded clip.");
-               }
-           }
+      } else if (engine.micRecorder.mediaRecorder?.state !== 'inactive') {
+        const recording = await engine.micRecorder.stop();
+        const trackId = micRecordingTrackId.current;
+        micRecordingTrackId.current = null;
+        if (recording && trackId) {
+          const durationBeats = secondsToBeats(recording.durationSeconds, state.bpm);
+          state.addClip(trackId, micRecordingStartBeat.current, recording.url, durationBeats, recording.mimeType);
         }
       }
     };
-    handleMicState();
+    void handleMicState();
   }, [isMicRecording]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media) return;
+    const handleChange = () => {
+      const state = useDAWStore.getState();
+      if (state.theme === 'system') state.toggleTheme('system');
+    };
+    media.addEventListener?.('change', handleChange);
+    return () => media.removeEventListener?.('change', handleChange);
+  }, []);
 
   useEffect(() => {
     // Remove the initial loader

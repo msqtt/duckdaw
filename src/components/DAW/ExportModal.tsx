@@ -3,6 +3,9 @@ import { useDAWStore } from '../../store/dawStore';
 import { Download, X, Film, CheckCircle2, Loader2, Music } from 'lucide-react';
 import * as Tone from 'tone';
 import { Dropdown } from '../ui/Dropdown';
+import toast from 'react-hot-toast';
+import { createExportPlan } from '../../lib/exportPlan';
+import { createTrackMixSettings } from '../../lib/mixSettings';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
@@ -62,7 +65,9 @@ function audioBufferToWav(buffer: AudioBuffer) {
 }
 
 export function ExportModal() {
-  const { exportModalOpen, setExportModalOpen, clips, tracks, bpm } = useDAWStore();
+  const titleId = React.useId();
+  const { exportModalOpen, setExportModalOpen, clips, tracks, bpm, masterVolume, loopStart, loopEnd, activeArrangementId } = useDAWStore();
+  const activeClips = clips.filter(clip => clip.arrangementId === activeArrangementId);
   
   const [format, setFormat] = useState('wav');
   const [sampleRate, setSampleRate] = useState('44100');
@@ -74,8 +79,8 @@ export function ExportModal() {
   if (!exportModalOpen) return null;
 
   // Calculate project details
-  const lastClipEnd = clips.reduce((max, clip) => Math.max(max, clip.start + clip.duration), 0);
-  const totalDurationSeconds = (lastClipEnd / (bpm / 60)); // beats / (beats per sec)
+  const lastClipEnd = activeClips.reduce((max, clip) => Math.max(max, clip.start + clip.duration), 0);
+  const totalDurationSeconds = lastClipEnd / (bpm / 60);
   
   const handleExport = async () => {
     setStatus('rendering');
@@ -91,10 +96,21 @@ export function ExportModal() {
     const interval = setInterval(updateProgress, 100);
 
     try {
-        const renderDuration = Math.max(1, totalDurationSeconds);
+        const plan = createExportPlan({
+          clips: activeClips,
+          bpm,
+          region: region as 'full' | 'selection',
+          loopStart,
+          loopEnd,
+          sampleRate: Number(sampleRate),
+        });
+        const renderClips = activeClips.filter(clip =>
+          clip.start < plan.endBeat && clip.start + clip.duration > plan.startBeat
+        );
 
         const renderedToneBuffer = await Tone.Offline(async () => {
              Tone.Transport.bpm.value = bpm;
+             Tone.Destination.volume.value = masterVolume === 0 ? -Infinity : 20 * Math.log10(masterVolume);
              Tone.getContext().lookAhead = 0;
 
              const synths = new Map();
@@ -102,16 +118,17 @@ export function ExportModal() {
              const players = new Map();
              
              for (const track of tracks) {
-                 const channel = new Tone.Channel().toDestination();
-                 channel.volume.value = track.volume === 0 ? -Infinity : 20 * Math.log10(track.volume);
-                 channel.pan.value = track.pan;
-                 channel.mute = track.isMuted;
-                 channel.solo = track.isSolo;
+                 const mix = createTrackMixSettings(track);
+                 const channel = new Tone.Channel();
+                 channel.volume.value = mix.volumeDb;
+                 channel.pan.value = mix.pan;
+                 channel.mute = mix.muted;
+                 channel.solo = mix.solo;
                  
                  const reverb = new Tone.Reverb(2);
                  const delay = new Tone.FeedbackDelay("8n", 0.3);
-                 reverb.wet.value = track.reverb || 0;
-                 delay.wet.value = track.delay || 0;
+                 reverb.wet.value = mix.reverbWet;
+                 delay.wet.value = mix.delayWet;
                  channel.chain(delay, reverb, Tone.Destination);
                  
                  channels.set(track.id, channel);
@@ -141,7 +158,7 @@ export function ExportModal() {
              const beatTime = 60 / bpm;
              
              // Pre-load audio buffers for audio tracks
-             const audioClips = clips.filter(c => c.type === 'audio' && c.bufferUrl);
+             const audioClips = renderClips.filter(c => c.type === 'audio' && c.bufferUrl);
              for (const clip of audioClips) {
                  const channel = channels.get(clip.trackId);
                  if (channel) {
@@ -152,9 +169,9 @@ export function ExportModal() {
                  }
              }
 
-             for (const clip of clips) {
-                 const absoluteStartBeat = clip.start;
-                 const startTimeSeconds = absoluteStartBeat * beatTime;
+             for (const clip of renderClips) {
+                 const relativeClipStartBeat = Math.max(0, clip.start - plan.startBeat);
+                 const startTimeSeconds = relativeClipStartBeat * beatTime;
                  
                  if (clip.type === 'midi' && clip.notes) {
                      const synth = synths.get(clip.trackId);
@@ -162,20 +179,26 @@ export function ExportModal() {
                      
                      clip.notes.forEach(note => {
                          const absoluteNoteStartBeat = clip.start + note.start;
-                         const noteStartTimeSeconds = absoluteNoteStartBeat * beatTime;
-                         const durationSeconds = note.duration * beatTime;
+                         if (absoluteNoteStartBeat < plan.startBeat || absoluteNoteStartBeat >= plan.endBeat) return;
+                         const noteStartTimeSeconds = (absoluteNoteStartBeat - plan.startBeat) * beatTime;
+                         const durationSeconds = Math.min(note.duration, plan.endBeat - absoluteNoteStartBeat) * beatTime;
                          synth.triggerAttackRelease(note.note, durationSeconds, noteStartTimeSeconds, note.velocity);
                      });
                  } else if (clip.type === 'audio' && clip.bufferUrl) {
                      const player = players.get(clip.id);
                      if (player) {
-                         player.start(startTimeSeconds);
+                         const offsetBeats = Math.max(0, plan.startBeat - clip.start);
+                         const availableBeats = Math.min(
+                           clip.duration - offsetBeats,
+                           plan.endBeat - Math.max(plan.startBeat, clip.start),
+                         );
+                         player.start(startTimeSeconds, offsetBeats * beatTime, availableBeats * beatTime);
                      }
                  }
              }
              
              Tone.Transport.start(0);
-        }, renderDuration);
+        }, plan.durationSeconds, 2, plan.sampleRate);
 
         clearInterval(interval);
         setProgress(50);
@@ -218,26 +241,26 @@ export function ExportModal() {
         URL.revokeObjectURL(url);
         
         setStatus('done');
-    } catch (err) {
-        console.error(err);
+    } catch (error) {
         clearInterval(interval);
         setStatus('idle');
-        alert("Render failed.");
+        toast.error(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 selection:bg-emerald-500/30">
-      <div className="bg-neutral-50 dark:bg-neutral-900 w-full max-w-xl rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col">
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-neutral-50 dark:bg-neutral-900 w-full max-w-xl rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col">
         {/* Header */}
         <div className="h-14 flex items-center justify-between px-6 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
               <Download size={18} />
             </div>
-            <h2 className="text-sm font-bold text-neutral-800 dark:text-neutral-100 uppercase tracking-wider">Export Audio</h2>
+            <h2 id={titleId} className="text-sm font-bold text-neutral-800 dark:text-neutral-100 uppercase tracking-wider">Export Audio</h2>
           </div>
           <button 
+            aria-label="Close export dialog"
             onClick={() => { setExportModalOpen(false); setStatus('idle'); setProgress(0); }}
             className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors"
             disabled={status === 'rendering' || status === 'encoding'}

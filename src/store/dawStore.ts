@@ -19,12 +19,14 @@ export interface Clip {
   id: string;
   name?: string;
   trackId: string;
+  arrangementId: string;
   start: number; // in beats (global timeline)
   duration: number; // in beats
   originalDuration?: number; // max duration constraint
   type: TrackType;
   notes: Note[]; // for midi
   bufferUrl?: string; // for audio
+  mimeType?: string; // original audio MIME for package restoration
   color?: string; // override track color
 }
 
@@ -63,27 +65,34 @@ export interface Arrangement {
   name: string;
 }
 
-interface DAWState {
+export type MetronomeSound = 'cute' | 'click' | 'woodblock' | 'electronic';
+
+export interface PersistedProjectState {
+  projectId: string;
+  createdAt: string;
   projectName: string;
   markers: Marker[];
   arrangements: Arrangement[];
   activeArrangementId: string | null;
   bpm: number;
   timeSignature: [number, number];
-  theme: ThemeMode;
-  isPlaying: boolean;
   isLooping: boolean;
-  snapGridSize: number;
-  snapToGrid: boolean;
   loopStart: number;
   loopEnd: number;
   metronomeOn: boolean;
   metronomeVolume: number;
-  metronomeSound: 'cute' | 'click' | 'woodblock' | 'electronic';
+  metronomeSound: MetronomeSound;
   metronomeSubdivisions: number;
   masterVolume: number;
   tracks: Track[];
   clips: Clip[];
+}
+
+export interface DAWState extends PersistedProjectState {
+  theme: ThemeMode;
+  isPlaying: boolean;
+  snapGridSize: number;
+  snapToGrid: boolean;
   selectedTrackId: string | null;
   selectedClipIds: string[];
   selectedNoteIds: string[];
@@ -121,18 +130,19 @@ interface DAWState {
   setPanelHeight: (height: number) => void;
   setPanelFullScreen: (fs: boolean) => void;
   setExportModalOpen: (open: boolean) => void;
-  loadProject: (data: Partial<DAWState>) => void;
-  getProjectData: () => Partial<DAWState>;
+  loadProject: (data: Partial<PersistedProjectState>) => void;
+  getProjectData: () => PersistedProjectState;
   addTrack: (type: TrackType) => void;
   deleteTrack: (id: string) => void;
   reorderTrack: (id: string, index: number) => void;
-  addClip: (trackId: string, start: number, bufferUrl?: string, duration?: number) => void;
+  addClip: (trackId: string, start: number, bufferUrl?: string, duration?: number, mimeType?: string) => void;
   duplicateClip: (clipId: string) => void;
   deleteClip: (clipId: string) => void;
   selectTrack: (id: string | null) => void;
   selectClip: (id: string | null, multi?: boolean) => void;
   selectNote: (id: string | null, multi?: boolean) => void;
   setClipboard: (type: 'clips' | 'notes', items: any[]) => void;
+  pasteClips: (startBeat: number, targetTrackId?: string) => void;
   setLastNoteDuration: (duration: number) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   updateClip: (id: string, updates: Partial<Clip>) => void;
@@ -141,6 +151,7 @@ interface DAWState {
   deleteNote: (clipId: string, noteId: string) => void;
   quantizeSelectedNotes: (clipId: string) => void;
   toggleRecording: () => void;
+  commitMidiRecording: (trackId: string, start: number, duration: number, notes: Note[]) => void;
   toggleMicRecording: () => void;
 
   // Markers & Arrangements
@@ -148,9 +159,25 @@ interface DAWState {
   updateMarker: (id: string, updates: Partial<Marker>) => void;
   deleteMarker: (id: string) => void;
   setArrangement: (id: string) => void;
-  addArrangement: (name: string) => void;
+  addArrangement: (name: string, copyCurrent?: boolean) => void;
   deleteArrangement: (id: string) => void;
 }
+
+const getInitialTheme = (): ThemeMode => {
+  if (typeof localStorage === 'undefined') return 'dark';
+  const stored = localStorage.getItem('duckdaw_theme');
+  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'dark';
+};
+
+const revokeUnusedBlobUrls = (previous: Clip[], retained: Clip[]) => {
+  if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+  const retainedUrls = new Set(retained.map(clip => clip.bufferUrl).filter(Boolean));
+  for (const clip of previous) {
+    if (clip.bufferUrl?.startsWith('blob:') && !retainedUrls.has(clip.bufferUrl)) {
+      URL.revokeObjectURL(clip.bufferUrl);
+    }
+  }
+};
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 const getRandomColor = () => {
@@ -161,6 +188,8 @@ const getRandomColor = () => {
 export const dawStore = createStore<DAWState>()(
   temporal(
     (set, get) => ({
+      projectId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
       projectName: 'My DuckDAW Project',
       markers: [],
       arrangements: [{ id: 'main', name: 'Main Arrangement' }],
@@ -174,7 +203,7 @@ export const dawStore = createStore<DAWState>()(
       exportModalOpen: false,
       isDirty: false,
       lastNoteDuration: 0.5,
-      theme: 'dark',
+      theme: getInitialTheme(),
       isPlaying: false,
       isLooping: false,
       snapGridSize: 0.25,
@@ -239,6 +268,7 @@ export const dawStore = createStore<DAWState>()(
         {
           id: 'clip-1',
           trackId: 'track-1',
+          arrangementId: 'main',
           start: 0,
           duration: 16,
           type: 'midi',
@@ -256,6 +286,7 @@ export const dawStore = createStore<DAWState>()(
         {
           id: 'clip-2',
           trackId: 'track-2',
+          arrangementId: 'main',
           start: 0,
           duration: 16,
           type: 'midi',
@@ -269,6 +300,7 @@ export const dawStore = createStore<DAWState>()(
         {
           id: 'clip-3',
           trackId: 'track-3',
+          arrangementId: 'main',
           start: 0,
           duration: 16,
           type: 'midi',
@@ -301,13 +333,13 @@ export const dawStore = createStore<DAWState>()(
       setPanelFullScreen: (fs) => set({ panelFullScreen: fs }),
       setExportModalOpen: (open) => set({ exportModalOpen: open }),
       setLastNoteDuration: (duration) => set({ lastNoteDuration: duration }),
-      toggleLoop: () => set((state) => ({ isLooping: !state.isLooping })),
-      setLoopRegion: (start, end) => set({ loopStart: start, loopEnd: end }),
-      toggleMetronome: () => set((state) => ({ metronomeOn: !state.metronomeOn })),
-      setMetronomeVolume: (volume) => set({ metronomeVolume: volume }),
-      setMetronomeSound: (sound) => set({ metronomeSound: sound }),
-      setMetronomeSubdivisions: (subdivisions) => set({ metronomeSubdivisions: subdivisions }),
-      setMasterVolume: (volume) => set({ masterVolume: volume }),
+      toggleLoop: () => set((state) => ({ isLooping: !state.isLooping, isDirty: true })),
+      setLoopRegion: (start, end) => set({ loopStart: start, loopEnd: end, isDirty: true }),
+      toggleMetronome: () => set((state) => ({ metronomeOn: !state.metronomeOn, isDirty: true })),
+      setMetronomeVolume: (volume) => set({ metronomeVolume: volume, isDirty: true }),
+      setMetronomeSound: (sound) => set({ metronomeSound: sound, isDirty: true }),
+      setMetronomeSubdivisions: (subdivisions) => set({ metronomeSubdivisions: subdivisions, isDirty: true }),
+      setMasterVolume: (volume) => set({ masterVolume: volume, isDirty: true }),
       toggleTheme: (mode) => set((state) => {
         let newTheme = mode;
         if (!newTheme) {
@@ -326,21 +358,78 @@ export const dawStore = createStore<DAWState>()(
           root.classList.add('dark');
         }
         
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('duckdaw_theme', newTheme!);
+        }
         return { theme: newTheme! };
       }),
-      loadProject: (data) => set((state) => ({
-        ...state,
-        bpm: data.bpm || state.bpm,
-        tracks: data.tracks || state.tracks,
-        clips: data.clips || state.clips,
-        isPlaying: false,
-        selectedTrackId: null,
-        selectedClipIds: [],
-        exportModalOpen: false,
-      })),
+      loadProject: (data) => set((state) => {
+        const arrangements = data.arrangements?.length
+          ? data.arrangements
+          : [{ id: 'main', name: 'Main Arrangement' }];
+        const activeArrangementId = data.activeArrangementId != null
+          && arrangements.some(arrangement => arrangement.id === data.activeArrangementId)
+          ? data.activeArrangementId
+          : arrangements[0].id;
+        const clips = (data.clips ?? []).map(clip => ({
+          ...clip,
+          arrangementId: clip.arrangementId ?? activeArrangementId,
+        }));
+        revokeUnusedBlobUrls([...state.clips, ...state.clipboardClips], clips);
+
+        return {
+          projectId: data.projectId ?? crypto.randomUUID(),
+          createdAt: data.createdAt ?? new Date().toISOString(),
+          projectName: data.projectName ?? 'New Project',
+          bpm: data.bpm ?? 120,
+          timeSignature: data.timeSignature ?? [4, 4],
+          isLooping: data.isLooping ?? false,
+          loopStart: data.loopStart ?? 0,
+          loopEnd: data.loopEnd ?? 16,
+          metronomeOn: data.metronomeOn ?? false,
+          metronomeVolume: data.metronomeVolume ?? 0.8,
+          metronomeSound: data.metronomeSound ?? 'cute',
+          metronomeSubdivisions: data.metronomeSubdivisions ?? 1,
+          masterVolume: data.masterVolume ?? 0.8,
+          tracks: data.tracks ?? [],
+          clips,
+          markers: data.markers ?? [],
+          arrangements,
+          activeArrangementId,
+          isPlaying: false,
+          isRecording: false,
+          isMicRecording: false,
+          selectedTrackId: null,
+          selectedClipIds: [],
+          selectedNoteIds: [],
+          clipboardClips: [],
+          clipboardNotes: [],
+          exportModalOpen: false,
+          isDirty: false,
+        };
+      }),
       getProjectData: () => {
         const state = get();
-        return { bpm: state.bpm, tracks: state.tracks, clips: state.clips };
+        return {
+          projectId: state.projectId,
+          createdAt: state.createdAt,
+          projectName: state.projectName,
+          bpm: state.bpm,
+          timeSignature: state.timeSignature,
+          isLooping: state.isLooping,
+          loopStart: state.loopStart,
+          loopEnd: state.loopEnd,
+          metronomeOn: state.metronomeOn,
+          metronomeVolume: state.metronomeVolume,
+          metronomeSound: state.metronomeSound,
+          metronomeSubdivisions: state.metronomeSubdivisions,
+          masterVolume: state.masterVolume,
+          tracks: state.tracks,
+          clips: state.clips,
+          markers: state.markers,
+          arrangements: state.arrangements,
+          activeArrangementId: state.activeArrangementId,
+        };
       },
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
       stop: () => set({ isPlaying: false, isRecording: false, isMicRecording: false }),
@@ -361,13 +450,17 @@ export const dawStore = createStore<DAWState>()(
         };
         return { tracks: [...state.tracks, newTrack], selectedTrackId: newTrack.id, isDirty: true };
       }),
-      deleteTrack: (id) => set((state) => ({
-          tracks: state.tracks.filter(t => t.id !== id),
-          clips: state.clips.filter(c => c.trackId !== id),
-          selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
-          selectedClipIds: state.selectedClipIds.filter(cId => state.clips.find(c => c.id === cId)?.trackId !== id),
-          isDirty: true
-      })),
+      deleteTrack: (id) => set((state) => {
+          const clips = state.clips.filter(clip => clip.trackId !== id);
+          revokeUnusedBlobUrls(state.clips, [...clips, ...state.clipboardClips]);
+          return {
+            tracks: state.tracks.filter(track => track.id !== id),
+            clips,
+            selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
+            selectedClipIds: state.selectedClipIds.filter(clipId => state.clips.find(clip => clip.id === clipId)?.trackId !== id),
+            isDirty: true
+          };
+      }),
       reorderTrack: (id, index) => set((state) => {
         const track = state.tracks.find(t => t.id === id);
         if (!track) return state;
@@ -375,19 +468,21 @@ export const dawStore = createStore<DAWState>()(
         newTracks.splice(index, 0, track);
         return { tracks: newTracks, isDirty: true };
       }),
-      addClip: (trackId, start, bufferUrl, duration) => set((state) => {
+      addClip: (trackId, start, bufferUrl, duration, mimeType) => set((state) => {
         const track = state.tracks.find(t => t.id === trackId);
         if (!track) return state;
         const newClip: Clip = {
           id: generateId(),
           trackId,
+          arrangementId: state.activeArrangementId ?? state.arrangements[0]?.id ?? 'main',
           start,
           duration: duration || 16,
           originalDuration: duration,
           type: track.type,
           notes: [],
           color: track.color,
-          bufferUrl
+          bufferUrl,
+          mimeType
         };
         return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id], isDirty: true };
       }),
@@ -404,11 +499,15 @@ export const dawStore = createStore<DAWState>()(
         }
         return { clips: [...state.clips, newClip], selectedClipIds: [newClip.id], isDirty: true };
       }),
-      deleteClip: (clipId) => set((state) => ({
-          clips: state.clips.filter(c => c.id !== clipId),
-          selectedClipIds: state.selectedClipIds.filter(id => id !== clipId),
-          isDirty: true
-      })),
+      deleteClip: (clipId) => set((state) => {
+          const clips = state.clips.filter(clip => clip.id !== clipId);
+          revokeUnusedBlobUrls(state.clips, [...clips, ...state.clipboardClips]);
+          return {
+            clips,
+            selectedClipIds: state.selectedClipIds.filter(id => id !== clipId),
+            isDirty: true
+          };
+      }),
       selectTrack: (id) => set({ selectedTrackId: id }),
       selectClip: (id, multi = false) => set((state) => {
         if (!id) return { selectedClipIds: [] };
@@ -434,18 +533,49 @@ export const dawStore = createStore<DAWState>()(
         }
         return { selectedNoteIds: [id] };
       }),
-      setClipboard: (type, items) => set((state) => {
-         if (type === 'clips') return { clipboardClips: items, clipboardNotes: [] };
-         return { clipboardNotes: items, clipboardClips: [] };
+      setClipboard: (type, items) => set(() => {
+         if (type === 'clips') return { clipboardClips: items.map(item => structuredClone(item)), clipboardNotes: [] };
+         return { clipboardNotes: items.map(item => structuredClone(item)), clipboardClips: [] };
+      }),
+      pasteClips: (startBeat, targetTrackId) => set((state) => {
+        if (state.clipboardClips.length === 0) return state;
+        const earliestStart = Math.min(...state.clipboardClips.map(clip => clip.start));
+        const pasted = state.clipboardClips.flatMap(source => {
+          const destinationTrackId = targetTrackId ?? source.trackId;
+          const destinationTrack = state.tracks.find(track => track.id === destinationTrackId);
+          if (!destinationTrack || destinationTrack.type !== source.type) return [];
+          return [{
+            ...structuredClone(source),
+            id: generateId(),
+            trackId: destinationTrackId,
+            arrangementId: state.activeArrangementId ?? state.arrangements[0]?.id ?? 'main',
+            start: Math.max(0, startBeat + source.start - earliestStart),
+            notes: source.notes.map(note => ({ ...note, id: generateId() })),
+          }];
+        });
+        if (pasted.length === 0) return state;
+        return {
+          clips: [...state.clips, ...pasted],
+          selectedClipIds: pasted.map(clip => clip.id),
+          isDirty: true,
+        };
       }),
       updateTrack: (id, updates) => set((state) => ({
         tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t),
         isDirty: true
       })),
-      updateClip: (id, updates) => set((state) => ({
-        clips: state.clips.map(c => c.id === id ? { ...c, ...updates } : c),
-        isDirty: true
-      })),
+      updateClip: (id, updates) => set((state) => {
+        const clip = state.clips.find(candidate => candidate.id === id);
+        if (!clip) return state;
+        if (updates.trackId != null) {
+          const targetTrack = state.tracks.find(track => track.id === updates.trackId);
+          if (!targetTrack || targetTrack.type !== clip.type) return state;
+        }
+        return {
+          clips: state.clips.map(candidate => candidate.id === id ? { ...candidate, ...updates } : candidate),
+          isDirty: true
+        };
+      }),
       addNote: (clipId, note) => set((state) => ({
         clips: state.clips.map(c => c.id === clipId ? { ...c, notes: [...(c.notes || []), note] } : c),
         isDirty: true
@@ -496,6 +626,26 @@ export const dawStore = createStore<DAWState>()(
         isDirty: true
       })),
       toggleRecording: () => set((state) => ({ isRecording: !state.isRecording, isPlaying: !state.isRecording ? true : state.isPlaying })),
+      commitMidiRecording: (trackId, start, duration, notes) => set((state) => {
+        const track = state.tracks.find(candidate => candidate.id === trackId);
+        if (!track || track.type !== 'midi' || notes.length === 0) return state;
+        const clip: Clip = {
+          id: generateId(),
+          trackId,
+          arrangementId: state.activeArrangementId ?? state.arrangements[0]?.id ?? 'main',
+          start: Math.max(0, start),
+          duration: Math.max(duration, ...notes.map(note => note.start + note.duration)),
+          type: 'midi',
+          notes: notes.map(note => ({ ...note, id: generateId() })),
+          color: track.color,
+          name: 'MIDI Recording',
+        };
+        return {
+          clips: [...state.clips, clip],
+          selectedClipIds: [clip.id],
+          isDirty: true,
+        };
+      }),
       toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying })),
       
       addMarker: (position, name = 'Marker') => set((state) => ({
@@ -510,22 +660,66 @@ export const dawStore = createStore<DAWState>()(
         markers: state.markers.filter(m => m.id !== id),
         isDirty: true
       })),
-      addArrangement: (name) => set((state) => ({
-        arrangements: [...state.arrangements, { id: generateId(), name }],
-        isDirty: true
-      })),
-      deleteArrangement: (id) => set((state) => ({
-        arrangements: state.arrangements.filter(a => a.id !== id),
-        activeArrangementId: state.activeArrangementId === id ? (state.arrangements.find(a => a.id !== id)?.id || null) : state.activeArrangementId,
-        isDirty: true
-      })),
-      setArrangement: (id) => set({ activeArrangementId: id, isDirty: true })
+      addArrangement: (name, copyCurrent = false) => set((state) => {
+        const arrangement = { id: generateId(), name };
+        const copiedClips = copyCurrent
+          ? state.clips
+              .filter(clip => clip.arrangementId === state.activeArrangementId)
+              .map(clip => ({
+                ...structuredClone(clip),
+                id: generateId(),
+                arrangementId: arrangement.id,
+                notes: clip.notes.map(note => ({ ...note, id: generateId() })),
+              }))
+          : [];
+        return {
+          arrangements: [...state.arrangements, arrangement],
+          clips: [...state.clips, ...copiedClips],
+          activeArrangementId: arrangement.id,
+          selectedClipIds: [],
+          isDirty: true,
+        };
+      }),
+      deleteArrangement: (id) => set((state) => {
+        if (state.arrangements.length <= 1) return state;
+        const arrangements = state.arrangements.filter(arrangement => arrangement.id !== id);
+        if (arrangements.length === state.arrangements.length) return state;
+        const activeArrangementId = state.activeArrangementId === id
+          ? arrangements[0].id
+          : state.activeArrangementId;
+        const clips = state.clips.filter(clip => clip.arrangementId !== id);
+        revokeUnusedBlobUrls(state.clips, [...clips, ...state.clipboardClips]);
+        return {
+          arrangements,
+          clips,
+          activeArrangementId,
+          selectedClipIds: [],
+          isDirty: true,
+        };
+      }),
+      setArrangement: (id) => set((state) => state.arrangements.some(arrangement => arrangement.id === id)
+        ? { activeArrangementId: id, selectedClipIds: [], isDirty: true }
+        : state)
     }),
     {
-      partialize: (state) => {
-        const { tracks, clips, bpm } = state;
-        return { tracks, clips, bpm };
-      },
+      partialize: (state) => ({
+        projectName: state.projectName,
+        bpm: state.bpm,
+        timeSignature: state.timeSignature,
+        isLooping: state.isLooping,
+        loopStart: state.loopStart,
+        loopEnd: state.loopEnd,
+        metronomeOn: state.metronomeOn,
+        metronomeVolume: state.metronomeVolume,
+        metronomeSound: state.metronomeSound,
+        metronomeSubdivisions: state.metronomeSubdivisions,
+        masterVolume: state.masterVolume,
+        tracks: state.tracks,
+        clips: state.clips,
+        markers: state.markers,
+        arrangements: state.arrangements,
+        activeArrangementId: state.activeArrangementId,
+      }),
     }
   )
 );
