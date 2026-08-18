@@ -12,6 +12,10 @@ vi.mock('idb-keyval', () => ({
 
 vi.stubGlobal('window', { confirm: confirmMock });
 
+vi.mock('./decisionService', () => ({
+  requestDecision: vi.fn(async () => confirmMock() ? { choice: 'discard' } : null),
+}));
+
 import {
   createNewProject,
   deleteTemplate,
@@ -33,7 +37,7 @@ describe('project lifecycle and templates', () => {
       tracks: [{
         id: 'track-1', name: 'Lead', type: 'midi', volume: 0.8, pan: 0,
         isMuted: false, isSolo: false, instrument: 'synth', color: '#123456',
-        reverb: 0, delay: 0,
+        reverb: 0, delay: 0, automationLanes: [],
       }],
       clips: [{
         id: 'clip-1', trackId: 'track-1', arrangementId: 'main', start: 0, duration: 4,

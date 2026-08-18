@@ -7,7 +7,13 @@ import {
   type MetronomeSound,
   type PersistedProjectState,
 } from '../store/dawStore';
+import { measurePerfAsync } from './performance';
+import { createDefaultAudioEdit } from './audioEditing';
+import { requestDecision } from './decisionService';
+import { createDefaultTempoMap, validateTempoMap, type TempoPoint } from './tempoMap';
+import { normalizeAutomationLane, type AutomationLane } from './automation';
 
+import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from './routingGraph';
 // A basic structure, matching the spec
 
 export interface Manifest {
@@ -76,7 +82,7 @@ function assertSafeResourceName(name: unknown): asserts name is string {
   }
 }
 
-export const DUCKDAW_FORMAT_VERSION = '1.1.0';
+export const DUCKDAW_FORMAT_VERSION = '2.0.0';
 
 function extensionForAudioMime(mimeType: unknown): string {
   switch (typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase() : '') {
@@ -130,6 +136,69 @@ function validateProjectData(project: any): void {
       throw new Error('Invalid or duplicate DuckDAW track');
     }
     trackIds.add(track.id);
+
+    if (track.automationLanes != null) {
+      if (!Array.isArray(track.automationLanes)) throw new Error('Invalid DuckDAW automation lanes');
+      const laneIds = new Set<string>();
+      for (const rawLane of track.automationLanes) {
+        try {
+          const lane = normalizeAutomationLane(rawLane as AutomationLane);
+          if (laneIds.has(lane.id)) throw new Error('duplicate lane ID');
+          laneIds.add(lane.id);
+        } catch (error) {
+          throw new Error('Invalid DuckDAW automation lane', { cause: error });
+        }
+      }
+    }
+  }
+
+  const rawTempoTrack = project.tempoTrack;
+  const projectMajor = getMajorVersion(project.meta?.version ?? '1.0.0');
+  if (rawTempoTrack != null) {
+    if (!Array.isArray(rawTempoTrack)) throw new Error('Invalid DuckDAW tempo track');
+    if (projectMajor >= 2) {
+      try {
+        validateTempoMap(rawTempoTrack as TempoPoint[]);
+      } catch (error) {
+        throw new Error('Invalid DuckDAW tempo track', { cause: error });
+      }
+    } else {
+      const ids = new Set<string>();
+      const beats = new Set<number>();
+      for (let index = 0; index < rawTempoTrack.length; index += 1) {
+        const point = rawTempoTrack[index];
+        const beat = point?.beat ?? point?.position;
+        const id = point?.id ?? `tempo-${index}`;
+        if (!Number.isFinite(beat) || beat < 0 || beats.has(beat)
+          || !Number.isFinite(point?.bpm) || point.bpm < 20 || point.bpm > 300
+          || (point?.curve !== 'step' && point?.curve !== 'linear') || ids.has(id)) {
+          throw new Error('Invalid DuckDAW legacy tempo track');
+        }
+        ids.add(id);
+        beats.add(beat);
+      }
+    }
+  } else if (projectMajor >= 2) {
+    throw new Error('Invalid DuckDAW tempo track');
+  }
+
+  const legacyRouting = createDefaultRouting(project.tracks);
+  if (projectMajor >= 2 && (!Array.isArray(project.buses) || !Array.isArray(project.sends))) {
+    throw new Error('Invalid DuckDAW routing graph');
+  }
+  const routingBuses = Array.isArray(project.buses) && project.buses.length > 0
+    ? project.buses as Bus[]
+    : legacyRouting.buses;
+  const routingSends = Array.isArray(project.sends) ? project.sends as Send[] : [];
+  const routingRoot = routingBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
+  try {
+    validateRoutingGraph(
+      project.tracks.map((track: any) => ({ id: track.id, outputBusId: track.outputBusId ?? routingRoot })),
+      routingBuses,
+      routingSends,
+    );
+  } catch (error) {
+    throw new Error('Invalid DuckDAW routing graph', { cause: error });
   }
 
   const clipIds = new Set<string>();
@@ -142,6 +211,41 @@ function validateProjectData(project: any): void {
       || !Number.isFinite(clip.start) || clip.start < 0
       || !Number.isFinite(clip.duration) || clip.duration <= 0) {
       throw new Error('Invalid DuckDAW clip or track reference');
+    }
+    const edit = clip.audioEdit;
+    if (clip.type === 'midi' && edit != null) {
+      throw new Error('MIDI clips cannot contain audio edit parameters');
+    }
+    if (clip.type === 'audio' && edit != null) {
+      const curves = new Set(['linear', 'exponential', 'sCurve', 'logarithmic']);
+      if (!Number.isFinite(edit.sourceOffsetSeconds) || edit.sourceOffsetSeconds < 0
+        || !Number.isFinite(edit.gainDb) || edit.gainDb < -60 || edit.gainDb > 24
+        || !Number.isFinite(edit.fadeInBeats) || edit.fadeInBeats < 0
+        || !Number.isFinite(edit.fadeOutBeats) || edit.fadeOutBeats < 0
+        || edit.fadeInBeats + edit.fadeOutBeats > clip.duration
+        || !curves.has(edit.fadeInCurve) || !curves.has(edit.fadeOutCurve)
+        || typeof edit.reversed !== 'boolean') {
+        throw new Error('Invalid DuckDAW audio edit parameters');
+      }
+    }
+    if (clip.takes != null) {
+      if (!Array.isArray(clip.takes)) throw new Error('Invalid DuckDAW takes');
+      const takeIds = new Set<string>();
+      for (const take of clip.takes) {
+        if (typeof take?.id !== 'string' || !take.id || takeIds.has(take.id)
+          || take.type !== clip.type || typeof take.name !== 'string'
+          || !Number.isFinite(take.duration) || take.duration <= 0
+          || typeof take.createdAt !== 'string'
+          || (take.type === 'midi' && !Array.isArray(take.notes))
+          || (take.type === 'audio' && take.mimeType != null
+            && (typeof take.mimeType !== 'string' || !take.mimeType.startsWith('audio/')))) {
+          throw new Error('Invalid or duplicate DuckDAW take');
+        }
+        takeIds.add(take.id);
+      }
+      if (clip.activeTakeId != null && !takeIds.has(clip.activeTakeId)) throw new Error('Invalid DuckDAW active take');
+    } else if (clip.activeTakeId != null) {
+      throw new Error('Invalid DuckDAW active take');
     }
     if (clip.type === 'midi') {
       if (!Array.isArray(clip.notes)) throw new Error('Invalid DuckDAW MIDI notes');
@@ -201,6 +305,9 @@ export function validatePersistedProjectState(project: Partial<PersistedProjectS
       loopEnd: project.loopEnd,
     },
     master: { volume: project.masterVolume ?? 0.8 },
+    tempoTrack: project.tempoTrack,
+    buses: project.buses,
+    sends: project.sends,
   });
 }
 
@@ -222,6 +329,11 @@ export async function createDuckDawPackage(
   
   // Pack Audio Clips
   for (const clip of clips) {
+    if (clip.type === 'audio') {
+      clip.audioEdit = { ...createDefaultAudioEdit(), ...clip.audioEdit };
+    } else {
+      delete clip.audioEdit;
+    }
     if (clip.type === 'audio' && clip.bufferUrl && clip.bufferUrl.startsWith('blob:')) {
       try {
         const response = await fetch(clip.bufferUrl);
@@ -257,6 +369,18 @@ export async function createDuckDawPackage(
     }
   };
 
+  const fallbackRouting = createDefaultRouting(store.tracks);
+  const candidateBuses = Array.isArray(store.buses) && store.buses.length > 0
+    ? store.buses
+    : fallbackRouting.buses;
+  const candidateSends = Array.isArray(store.sends) ? store.sends : [];
+  const rootBusId = candidateBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
+  const tracksWithRouting = store.tracks.map(track => ({
+    ...track,
+    outputBusId: track.outputBusId ?? rootBusId,
+  }));
+  const routing = validateRoutingGraph(tracksWithRouting, candidateBuses, candidateSends);
+
   const arrangements = store.arrangements.length > 0
     ? store.arrangements
     : [{ id: 'main', name: 'Main Arrangement' }];
@@ -287,16 +411,17 @@ export async function createDuckDawPackage(
     master: {
       volume: store.masterVolume
     },
-    tracks: store.tracks.map(t => ({
-      ...t,
+    tracks: tracksWithRouting.map(track => ({
+      ...track,
       insertEffects: [],
-      sends: [],
-      automationLanes: []
+      automationLanes: track.automationLanes ?? []
     })),
+    buses: routing.buses,
+    sends: routing.sends,
     clips: clips,
     markers: store.markers,
     automation: [],
-    tempoTrack: [{ position: 0, bpm: store.bpm, curve: 'linear' }],
+    tempoTrack: store.tempoTrack ?? createDefaultTempoMap(store.bpm),
     arrangements,
     activeArrangementId
   };
@@ -414,11 +539,44 @@ export async function loadDuckDawPackage(file: File | Blob): Promise<ProjectPack
   const transport = project.transport ?? {};
   const metronome = transport.metronome ?? {};
 
+  // Migrate tempo track from v1.x format ({position, bpm, curve}) to v2 ({id, beat, bpm, curve})
+  const rawTempoTrack = Array.isArray(project.tempoTrack) ? project.tempoTrack : [];
+  const effectiveBpm = transport.bpm ?? manifest.bpm ?? 120;
+  let migratedTempoTrack: TempoPoint[];
+  if (rawTempoTrack.length > 0 && rawTempoTrack[0].id != null) {
+    migratedTempoTrack = validateTempoMap(rawTempoTrack as TempoPoint[]);
+  } else if (rawTempoTrack.length > 0) {
+    const migrated = rawTempoTrack.map((p: any, i: number) => ({
+      id: `tempo-${i}`,
+      beat: typeof p.position === 'number' ? p.position : (typeof p.beat === 'number' ? p.beat : 0),
+      bpm: Number(p.bpm),
+      curve: p.curve === 'linear' ? 'linear' as const : 'step' as const,
+    }));
+    migratedTempoTrack = validateTempoMap(migrated);
+  } else {
+    migratedTempoTrack = createDefaultTempoMap(effectiveBpm);
+  }
+
+  const fallbackRouting = createDefaultRouting(Array.isArray(project.tracks) ? project.tracks : []);
+  const migratedBuses = Array.isArray(project.buses) && project.buses.length > 0
+    ? project.buses as Bus[]
+    : fallbackRouting.buses;
+  const migratedSends = Array.isArray(project.sends) ? project.sends as Send[] : [];
+  const rootBusId = migratedBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
+  const migratedTracks = (Array.isArray(project.tracks) ? project.tracks : []).map((track: any) => ({
+    ...track,
+    automationLanes: Array.isArray(track.automationLanes)
+      ? track.automationLanes.map((lane: AutomationLane) => normalizeAutomationLane(lane))
+      : [],
+    outputBusId: track.outputBusId ?? rootBusId,
+  }));
+  const migratedRouting = validateRoutingGraph(migratedTracks, migratedBuses, migratedSends);
+
   const compatibleProject: PersistedProjectState = {
     projectId: manifest.projectId,
     createdAt: manifest.createdAt ?? new Date().toISOString(),
     projectName: manifest.name ?? 'New Project',
-    bpm: transport.bpm ?? manifest.bpm ?? 120,
+    bpm: effectiveBpm,
     timeSignature: transport.timeSignature ?? manifest.timeSignature ?? [4, 4],
     isLooping: transport.isLooping ?? false,
     loopStart: transport.loopStart ?? 0,
@@ -428,13 +586,22 @@ export async function loadDuckDawPackage(file: File | Blob): Promise<ProjectPack
     metronomeSound: getMetronomeSound(metronome.sound),
     metronomeSubdivisions: metronome.subdivisions ?? 1,
     masterVolume: project.master?.volume ?? project.masterVolume ?? 0.8,
-    tracks: Array.isArray(project.tracks) ? project.tracks : [],
+    tracks: migratedTracks,
     clips: Array.isArray(project.clips)
-      ? project.clips.map((clip: Clip) => ({ ...clip, arrangementId: clip.arrangementId ?? activeArrangementId }))
+      ? project.clips.map((clip: Clip) => ({
+          ...clip,
+          arrangementId: clip.arrangementId ?? activeArrangementId,
+          audioEdit: clip.type === 'audio'
+            ? { ...createDefaultAudioEdit(), ...clip.audioEdit }
+            : undefined,
+        }))
       : [],
     markers: Array.isArray(project.markers) ? project.markers : [],
     arrangements,
     activeArrangementId,
+    tempoTrack: migratedTempoTrack,
+    buses: migratedRouting.buses,
+    sends: migratedRouting.sends,
   };
 
   return {
@@ -460,39 +627,117 @@ export async function saveToFileSystemAsDownload(blob: Blob, name: string) {
 const FILE_HANDLE_KEY = 'duckdaw_current_file_handle';
 const RECENT_PROJECTS_KEY = 'duckdaw_recent_projects';
 const TEMPLATES_KEY = 'duckdaw_templates';
-const RECOVERY_SNAPSHOT_KEY = 'duckdaw_recovery_snapshot_v1';
+const LEGACY_RECOVERY_SNAPSHOT_KEY = 'duckdaw_recovery_snapshot_v1';
+const RECOVERY_SNAPSHOT_KEY = 'duckdaw_recovery_snapshot_v2';
+const RECOVERY_ASSET_PREFIX = 'duckdaw_recovery_asset_v2:';
 
-export interface RecoverySnapshot {
+interface LegacyRecoverySnapshot {
   projectId: string;
   updatedAt: number;
   packageData: ArrayBuffer;
 }
 
-export async function saveRecoverySnapshot(): Promise<RecoverySnapshot> {
+interface RecoveryAsset {
+  data: ArrayBuffer;
+  mimeType: string;
+}
+
+export interface IncrementalRecoverySnapshot {
+  version: 2;
+  projectId: string;
+  updatedAt: number;
+  project: PersistedProjectState;
+  assetIds: string[];
+}
+
+export type RecoverySnapshot = IncrementalRecoverySnapshot | LegacyRecoverySnapshot;
+
+async function hashRecoveryAsset(data: ArrayBuffer): Promise<string> {
+  if (crypto.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+  }
+  let hash = 2166136261;
+  for (const value of new Uint8Array(data)) {
+    hash ^= value;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}-${data.byteLength}`;
+}
+
+export async function saveRecoverySnapshot(): Promise<IncrementalRecoverySnapshot> {
+  return measurePerfAsync('recovery-save', async () => {
   const state = useDAWStore.getState();
-  const blob = await createDuckDawPackage();
-  const snapshot: RecoverySnapshot = {
+  const previous = await getRecoverySnapshot();
+  const project = structuredClone(state.getProjectData());
+  const assetIds = new Set<string>();
+
+  for (const clip of project.clips) {
+    if (clip.type !== 'audio' || !clip.bufferUrl?.startsWith('blob:')) continue;
+    const response = await fetch(clip.bufferUrl);
+    const data = await response.arrayBuffer();
+    const assetId = await hashRecoveryAsset(data);
+    const assetKey = `${RECOVERY_ASSET_PREFIX}${assetId}`;
+    if (!await idb.get<RecoveryAsset>(assetKey)) {
+      await idb.set(assetKey, { data, mimeType: clip.mimeType ?? 'audio/wav' } satisfies RecoveryAsset);
+    }
+    clip.bufferUrl = `recovery-assets/${assetId}`;
+    assetIds.add(assetId);
+  }
+
+  const snapshot: IncrementalRecoverySnapshot = {
+    version: 2,
     projectId: state.projectId,
     updatedAt: Date.now(),
-    packageData: await blob.arrayBuffer(),
+    project,
+    assetIds: [...assetIds],
   };
   await idb.set(RECOVERY_SNAPSHOT_KEY, snapshot);
+
+  if (previous && 'version' in previous && previous.version === 2) {
+    for (const oldAssetId of previous.assetIds) {
+      if (!assetIds.has(oldAssetId)) await idb.del(`${RECOVERY_ASSET_PREFIX}${oldAssetId}`);
+    }
+  }
   return snapshot;
+  });
 }
 
 export async function getRecoverySnapshot(): Promise<RecoverySnapshot | null> {
-  return await idb.get<RecoverySnapshot>(RECOVERY_SNAPSHOT_KEY) ?? null;
+  return await idb.get<IncrementalRecoverySnapshot>(RECOVERY_SNAPSHOT_KEY)
+    ?? await idb.get<LegacyRecoverySnapshot>(LEGACY_RECOVERY_SNAPSHOT_KEY)
+    ?? null;
 }
 
 export async function clearRecoverySnapshot(): Promise<void> {
-  await idb.del(RECOVERY_SNAPSHOT_KEY);
+  const snapshot = await getRecoverySnapshot();
+  if (snapshot && 'version' in snapshot && snapshot.version === 2) {
+    await Promise.all(snapshot.assetIds.map(assetId => idb.del(`${RECOVERY_ASSET_PREFIX}${assetId}`)));
+  }
+  await Promise.all([
+    idb.del(RECOVERY_SNAPSHOT_KEY),
+    idb.del(LEGACY_RECOVERY_SNAPSHOT_KEY),
+  ]);
 }
 
 export async function restoreRecoverySnapshot(): Promise<boolean> {
   const snapshot = await getRecoverySnapshot();
   if (!snapshot) return false;
-  const pkg = await loadDuckDawPackage(new Blob([snapshot.packageData], { type: 'application/zip' }));
-  useDAWStore.getState().loadProject(pkg.project);
+  if ('packageData' in snapshot) {
+    const pkg = await loadDuckDawPackage(new Blob([snapshot.packageData], { type: 'application/zip' }));
+    useDAWStore.getState().loadProject(pkg.project);
+  } else {
+    const project = structuredClone(snapshot.project);
+    for (const clip of project.clips) {
+      if (clip.type !== 'audio' || !clip.bufferUrl?.startsWith('recovery-assets/')) continue;
+      const assetId = clip.bufferUrl.slice('recovery-assets/'.length);
+      const asset = await idb.get<RecoveryAsset>(`${RECOVERY_ASSET_PREFIX}${assetId}`);
+      if (!asset) throw new Error(`Recovery audio asset is missing: ${assetId}`);
+      clip.mimeType = asset.mimeType;
+      clip.bufferUrl = URL.createObjectURL(new Blob([asset.data], { type: asset.mimeType }));
+    }
+    useDAWStore.getState().loadProject(project);
+  }
   useDAWStore.getState().setDirty(true);
   return true;
 }
@@ -623,7 +868,7 @@ export async function saveProject(forceDialog = false, isAutoSave = false): Prom
 }
 
 export async function openProject() {
-  if (!confirmDiscardChanges()) return false;
+  if (!await confirmDiscardChanges()) return false;
   if (!('showOpenFilePicker' in window)) {
      // User has to use the old generic SettingsModal import
      throw new Error('File handling not supported in this browser. Please use Settings dialog.');
@@ -673,7 +918,7 @@ export async function openProject() {
 }
 
 export async function openRecentProject(handle: any) {
-  if (!confirmDiscardChanges()) return false;
+  if (!await confirmDiscardChanges()) return false;
   // Check permission
   if (await handle.queryPermission({ mode: 'read' }) !== 'granted') {
     if (await handle.requestPermission({ mode: 'read' }) !== 'granted') {
@@ -708,13 +953,22 @@ export async function openRecentProject(handle: any) {
   return true;
 }
 
-export function confirmDiscardChanges(): boolean {
+export async function confirmDiscardChanges(): Promise<boolean> {
   const state = useDAWStore.getState();
-  return !state.isDirty || window.confirm('You have unsaved changes. Discard them and continue?');
+  if (!state.isDirty) return true;
+  const result = await requestDecision({
+    title: 'Discard unsaved changes?',
+    message: 'Your current project has unsaved changes. This action cannot be undone.',
+    options: [
+      { id: 'cancel', label: 'Keep editing', kind: 'secondary' },
+      { id: 'discard', label: 'Discard changes', kind: 'danger' },
+    ],
+  });
+  return result?.choice === 'discard';
 }
 
 export async function createNewProject(): Promise<boolean> {
-  if (!confirmDiscardChanges()) return false;
+  if (!await confirmDiscardChanges()) return false;
 
   await idb.del(FILE_HANDLE_KEY);
   await clearRecoverySnapshot();

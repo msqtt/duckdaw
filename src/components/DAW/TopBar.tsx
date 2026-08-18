@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import * as Tone from 'tone';
-import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown } from 'lucide-react';
+import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown, Timer, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
-import { SettingsModal } from './SettingsModal';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
 import { createNewProject, deleteTemplate, saveProject, openProject, getRecentProjects, openRecentProject, RecentProject, saveAsTemplate, getTemplates, openTemplate, ProjectTemplate } from '../../lib/projectStorage';
+import { requestDecision } from '../../lib/decisionService';
 import toast from 'react-hot-toast';
 
 import { useShallow } from 'zustand/react/shallow';
+
+const SettingsModal = React.lazy(() => import('./SettingsModal').then(module => ({ default: module.SettingsModal })));
+const TempoMapEditor = React.lazy(() => import('./TempoMapEditor').then(module => ({ default: module.TempoMapEditor })));
+const AutomationPanel = React.lazy(() => import('./AutomationPanel').then(module => ({ default: module.AutomationPanel })));
 
 export function TopBar() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
@@ -62,6 +66,8 @@ export function TopBar() {
   
   const [showSettings, setShowSettings] = useState(false);
   const [showMetronomeMenu, setShowMetronomeMenu] = useState(false);
+  const [showTempoMap, setShowTempoMap] = useState(false);
+  const [showAutomation, setShowAutomation] = useState(false);
   const metronomeRef = React.useRef<HTMLDivElement>(null);
   
   useEffect(() => {
@@ -154,6 +160,7 @@ export function TopBar() {
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-4">
           <Dropdown
+            ariaLabel="Project menu"
             align="left"
             options={[
               { value: 'new', label: 'New Project (Reset)' },
@@ -199,7 +206,16 @@ export function TopBar() {
                 return;
               }
               if (val === 'save_template') {
-                 const name = window.prompt("Template Name:");
+                 const decision = await requestDecision({
+                   title: 'Save as template',
+                   message: 'Choose a name for this structure-only template.',
+                   input: { label: 'Template name', placeholder: 'My Template' },
+                   options: [
+                     { id: 'cancel', label: 'Cancel', kind: 'secondary' },
+                     { id: 'save', label: 'Save template', kind: 'primary', requiresValue: true },
+                   ],
+                 });
+                 const name = decision?.choice === 'save' ? decision.value : undefined;
                  if (name) {
                     try {
                         await saveAsTemplate(name, "User saved template.");
@@ -268,6 +284,7 @@ export function TopBar() {
           </div>
           <div className="h-4 w-px bg-neutral-300 dark:bg-neutral-700 mx-1" />
           <Dropdown
+            ariaLabel="Arrangement"
             align="left"
             options={[
               ...arrangements.map(a => ({ value: a.id, label: a.name })),
@@ -276,19 +293,37 @@ export function TopBar() {
               ...(arrangements.length > 1 ? [{ value: 'delete_current', label: 'Delete Current Arrangement' }] : [])
             ]}
             value={activeArrangementId || undefined}
-            onChange={(val) => {
+            onChange={async (val) => {
               if (val === 'divider') return;
               if (val === 'delete_current') {
-                if (activeArrangementId && window.confirm('Delete the current arrangement and all of its clips?')) {
-                  deleteArrangement(activeArrangementId);
-                }
+                if (!activeArrangementId) return;
+                const decision = await requestDecision({
+                  title: 'Delete arrangement?',
+                  message: 'The current arrangement and all clips that belong to it will be deleted.',
+                  options: [
+                    { id: 'cancel', label: 'Cancel', kind: 'secondary' },
+                    { id: 'delete', label: 'Delete arrangement', kind: 'danger' },
+                  ],
+                });
+                if (decision?.choice === 'delete') deleteArrangement(activeArrangementId);
                 return;
               }
               if (val === 'new') {
-                const name = window.prompt("Arrangement name:", "Arrangement " + (arrangements.length + 1));
-                if (name) {
-                  const copyCurrent = window.confirm('Copy clips from the current arrangement? Choose Cancel for an empty arrangement.');
-                  addArrangement(name, copyCurrent);
+                const decision = await requestDecision({
+                  title: 'New arrangement',
+                  message: 'Create an empty arrangement or copy all clips from the current arrangement.',
+                  input: {
+                    label: 'Arrangement name',
+                    defaultValue: `Arrangement ${arrangements.length + 1}`,
+                  },
+                  options: [
+                    { id: 'cancel', label: 'Cancel', kind: 'secondary' },
+                    { id: 'empty', label: 'Create empty', kind: 'secondary', requiresValue: true },
+                    { id: 'copy', label: 'Copy current', kind: 'primary', requiresValue: true },
+                  ],
+                });
+                if (decision && decision.choice !== 'cancel' && decision.value) {
+                  addArrangement(decision.value, decision.choice === 'copy');
                 }
               } else {
                 setArrangement(val);
@@ -433,6 +468,8 @@ export function TopBar() {
                       type="range" 
                       min="0" max="1" step="0.01" 
                       value={useDAWStore.getState().metronomeVolume}
+                      aria-label="Metronome volume"
+                      aria-valuetext={`${Math.round(useDAWStore.getState().metronomeVolume * 100)}%`}
                       onChange={(e) => useDAWStore.getState().setMetronomeVolume(parseFloat(e.target.value))}
                       className="w-full h-1 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:rounded-full"
                     />
@@ -448,6 +485,7 @@ export function TopBar() {
             <span className="text-xs uppercase text-neutral-500 font-bold">BPM</span>
             <input 
                className="font-mono text-emerald-600 dark:text-emerald-500 font-bold text-lg bg-transparent w-12 outline-none"
+               aria-label="Tempo BPM"
                value={bpmInput}
                onChange={(e) => setBpmInput(e.target.value)}
                onBlur={() => {
@@ -539,14 +577,47 @@ export function TopBar() {
           <Download size={16} />
           <span>Export</span>
         </button>
+        <button
+          type="button"
+          className={`p-1.5 rounded transition-colors ${showTempoMap ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400'}`}
+          title="Tempo Map"
+          aria-label="Toggle tempo map editor"
+          aria-pressed={showTempoMap}
+          onClick={() => setShowTempoMap(v => !v)}
+        >
+          <Timer size={18} />
+        </button>
+        <button
+          type="button"
+          className={`p-1.5 rounded transition-colors ${showAutomation ? 'bg-yellow-500/20 text-yellow-400' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400'}`}
+          title="Automation"
+          aria-label="Toggle automation panel"
+          aria-pressed={showAutomation}
+          onClick={() => setShowAutomation(v => !v)}
+        >
+          <Zap size={18} />
+        </button>
         <button 
+          aria-label="Settings"
           className="p-2 bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors"
           onClick={() => setShowSettings(true)}
         >
           <Settings2 size={20} />
         </button>
       </div>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <React.Suspense fallback={null}>
+        {showTempoMap && (
+          <div className="absolute right-4 top-16 z-50 w-72">
+            <TempoMapEditor onClose={() => setShowTempoMap(false)} />
+          </div>
+        )}
+        {showAutomation && (
+          <div className="absolute right-4 top-16 z-50 w-80">
+            <AutomationPanel onClose={() => setShowAutomation(false)} />
+          </div>
+        )}
+        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      </React.Suspense>
     </div>
   );
 }

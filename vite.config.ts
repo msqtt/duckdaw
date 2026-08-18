@@ -1,19 +1,35 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import {defineConfig} from 'vite';
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      __DUCKDAW_COMMIT__: JSON.stringify(process.env.COMMIT_REF ?? process.env.GITHUB_SHA ?? 'local'),
+      __DUCKDAW_CONTEXT__: JSON.stringify(process.env.DUCKDAW_DEPLOY_ENV ?? process.env.CONTEXT ?? 'local'),
+      __DUCKDAW_BRANCH__: JSON.stringify(process.env.BRANCH ?? process.env.GITHUB_REF_NAME ?? 'local'),
     },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes('/node_modules/tone/')) return 'vendor-tone';
+            if (id.includes('/node_modules/@ffmpeg/')) return 'vendor-ffmpeg';
+            if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) return 'vendor-react';
+            if (/\/src\/lib\/(automation|tempoMap|routingGraph|mixGraph)\.ts$/.test(id)) return 'daw-domain';
+          },
+        },
+      },
+    },
+    test: {
+      exclude: ['e2e/**', 'node_modules/**'],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

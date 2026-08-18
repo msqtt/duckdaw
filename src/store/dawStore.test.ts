@@ -31,6 +31,8 @@ const fullProject: PersistedProjectState = {
     reverb: 0.3,
     delay: 0.2,
     env: { attack: 0.1, decay: 0.2, sustain: 0.4, release: 0.8 },
+    automationLanes: [],
+    outputBusId: 'master',
   }],
   clips: [{
     id: 'clip-a',
@@ -47,6 +49,9 @@ const fullProject: PersistedProjectState = {
     { id: 'alt', name: 'Alternate' },
   ],
   activeArrangementId: 'alt',
+  tempoTrack: [{ id: 'tempo-0', beat: 0, bpm: 96, curve: 'step' }],
+  buses: [{ id: 'master', name: 'Master', volume: 1, pan: 0, isMuted: false, effects: [], outputBusId: null }],
+  sends: [],
 };
 
 describe('dawStore project replacement', () => {

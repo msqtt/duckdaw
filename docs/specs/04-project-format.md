@@ -2,7 +2,7 @@
 
 ## 1. 格式标识
 
-- 当前格式版本：`1.1.0`；
+- 当前格式版本：`2.0.0`；
 - 扩展名：`.duckdaw`；
 - 容器：ZIP；
 - JSON 编码：UTF-8；
@@ -22,16 +22,16 @@ project.duckdaw
     └── <resource-id>.json
 ```
 
-v1.1.0 不允许工程主体依赖包外绝对路径、`file:` URL、HTTP URL 或旧会话 `blob:` URL。
+v2.0.0 不允许工程主体依赖包外绝对路径、`file:` URL、HTTP URL 或旧会话 `blob:` URL。
 
 ## 3. `manifest.json`
 
 ### 3.1 Schema
 
 ```ts
-interface ManifestV1_1 {
+interface ManifestV2 {
   format: 'duckdaw';
-  version: '1.1.0';
+  version: '2.0.0';
   generator: string;
   createdAt: string;       // ISO 8601
   updatedAt: string;       // ISO 8601
@@ -64,22 +64,23 @@ interface ManifestV1_1 {
 ### 4.1 顶层 Schema
 
 ```ts
-interface ProjectV1_1 {
+interface ProjectV2 {
   meta: {
-    version: '1.1.0';
+    version: '2.0.0';
     projectId: string;
   };
   transport: TransportV1_1;
   master: {
     volume: number;
   };
-  tracks: TrackV1_1[];
-  clips: ClipV1_1[];
+  tracks: TrackV2[];
+  clips: ClipV1_2[];
   markers: MarkerV1_1[];
   arrangements: ArrangementV1_1[];
   activeArrangementId: string;
-  automation: unknown[];
-  tempoTrack: TempoPointV1_1[];
+  tempoTrack: TempoPointV2[];
+  buses: BusV2[];
+  sends: SendV2[];
 }
 ```
 
@@ -110,7 +111,7 @@ interface TransportV1_1 {
 type TrackType = 'midi' | 'audio';
 type InstrumentType = 'piano' | 'synth' | 'bass' | 'drum';
 
-interface TrackV1_1 {
+interface TrackV2 {
   id: string;
   name: string;
   type: TrackType;
@@ -128,9 +129,9 @@ interface TrackV1_1 {
     sustain: number;                   // 0..1
     release: number;
   };
-  insertEffects: unknown[];            // v1.1 保留
-  sends: unknown[];                    // v1.1 保留
-  automationLanes: unknown[];          // v1.1 保留
+  insertEffects: unknown[];            // legacy track effects；v2 Bus effects 见下文
+  automationLanes: AutomationLaneV1_2[];
+  outputBusId: string;                 // 必须引用 buses[]
 }
 ```
 
@@ -147,7 +148,28 @@ interface NoteV1_1 {
   velocity: number;                    // 0..1
 }
 
-interface ClipV1_1 {
+interface AudioEditParamsV1_2 {
+  sourceOffsetSeconds: number;          // >= 0
+  gainDb: number;                       // -60..24
+  fadeInBeats: number;                  // >= 0
+  fadeOutBeats: number;                 // >= 0，且两侧 fade 总和 <= clip.duration
+  fadeInCurve: 'linear' | 'exponential' | 'sCurve' | 'logarithmic';
+  fadeOutCurve: 'linear' | 'exponential' | 'sCurve' | 'logarithmic';
+  reversed: boolean;
+}
+
+interface TakeV1_2 {
+  id: string;
+  name: string;
+  type: TrackType;
+  notes?: NoteV1_1[];
+  resourceId?: string;
+  mimeType?: string;
+  duration: number;
+  createdAt: string;
+}
+
+interface ClipV1_2 {
   id: string;
   name?: string;
   trackId: string;
@@ -159,6 +181,9 @@ interface ClipV1_1 {
   notes: NoteV1_1[];                   // midi 使用；audio 应为空
   bufferUrl?: string;                  // audio: samples/<filename>
   mimeType?: string;                   // audio/*；旧文件按资源扩展名推断
+  audioEdit?: AudioEditParamsV1_2;     // 仅 Audio Clip；缺失时迁移为无听感变化默认值
+  takes?: TakeV1_2[];
+  activeTakeId?: string;
   color?: string;
 }
 ```
@@ -182,14 +207,57 @@ interface ArrangementV1_1 {
   name: string;
 }
 
-interface TempoPointV1_1 {
-  position: number;
-  bpm: number;
-  curve: 'linear' | 'step';
+interface AutomationPointV1_2 {
+  id: string;
+  beat: number;                         // >= 0；lane 内唯一
+  value: number;                        // 受 target 值域约束
+  curve: 'step' | 'linear' | 'exponential';
+}
+
+interface AutomationLaneV1_2 {
+  id: string;
+  target: 'volume' | 'pan' | 'reverb' | 'delay' | 'masterVolume';
+  enabled: boolean;
+  points: AutomationPointV1_2[];        // ID/beat 唯一，按 beat 稳定排序
+}
+
+interface TempoPointV2 {
+  id: string;
+  beat: number;                         // >= 0；首点必须为 0
+  bpm: number;                          // 20..300
+  curve: 'linear' | 'step';             // 控制到下一点的 segment
+}
+
+interface EffectDescriptorV2 {
+  id: string;
+  type: 'reverb' | 'delay' | 'limiter';
+  enabled: boolean;
+  parameters: Record<string, number>;
+}
+
+interface BusV2 {
+  id: string;
+  name: string;
+  volume: number;                       // 0..1
+  pan: number;                          // -1..1
+  isMuted: boolean;
+  effects: EffectDescriptorV2[];
+  outputBusId: string | null;           // 唯一 null Bus 连接 destination
+}
+
+interface SendV2 {
+  id: string;
+  sourceTrackId?: string;               // 与 sourceBusId 二选一
+  sourceBusId?: string;
+  targetBusId: string;
+  gain: number;                         // 0..1
+  preFader: boolean;
 }
 ```
 
-v1.1 当前写出 `tempoTrack` 和 `automation` 作为前向兼容占位；在 UI 未实现前，加载器应保留未知但合法数据，避免无意丢失。
+Tempo、Bus output 和 Bus-origin Send 共同参与 DAG 校验；拒绝环、悬空引用、重复 ID、多个 destination-root Bus 和二义性 Send source。Track automation 的 volume/reverb/delay/masterVolume 值域为 `0..1`，pan 为 `-1..1`；指数段两端必须严格大于 0。
+
+v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 Track 的 `outputBusId = 'master'` 和空 Sends；迁移或校验失败时不得替换当前工程。
 
 ## 5. 最小示例
 
@@ -198,7 +266,7 @@ v1.1 当前写出 `tempoTrack` 和 `automation` 作为前向兼容占位；在 U
 ```json
 {
   "format": "duckdaw",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "generator": "duckdaw",
   "createdAt": "2026-08-17T00:00:00.000Z",
   "updatedAt": "2026-08-17T00:00:00.000Z",
@@ -215,7 +283,7 @@ v1.1 当前写出 `tempoTrack` 和 `automation` 作为前向兼容占位；在 U
 ```json
 {
   "meta": {
-    "version": "1.1.0",
+    "version": "2.0.0",
     "projectId": "8cf860e5-b5cc-4b8c-aa08-1f0d28fb52b4"
   },
   "transport": {
@@ -238,8 +306,12 @@ v1.1 当前写出 `tempoTrack` 和 `automation` 作为前向兼容占位；在 U
   "markers": [],
   "arrangements": [{ "id": "main", "name": "Main Arrangement" }],
   "activeArrangementId": "main",
-  "automation": [],
-  "tempoTrack": [{ "position": 0, "bpm": 120, "curve": "linear" }]
+  "tempoTrack": [{ "id": "tempo-0", "beat": 0, "bpm": 120, "curve": "step" }],
+  "buses": [{
+    "id": "master", "name": "Master", "volume": 1, "pan": 0,
+    "isMuted": false, "effects": [], "outputBusId": null
+  }],
+  "sends": []
 }
 ```
 
@@ -283,8 +355,11 @@ v1.1 当前写出 `tempoTrack` 和 `automation` 作为前向兼容占位；在 U
 | markers | `[]` |
 | arrangements | `[{id:'main', name:'Main Arrangement'}]` |
 | activeArrangementId | 第一个 arrangement ID |
-| automation | `[]` |
-| tempoTrack | position 0 的当前 BPM |
+| Track.automationLanes | `[]` |
+| tempoTrack | beat 0、当前 BPM 的 step 点 |
+| buses | 唯一 `master` Bus，output 为 `null` |
+| Track.outputBusId | `master` |
+| sends | `[]` |
 
 ### Legacy JSON
 

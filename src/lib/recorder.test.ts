@@ -10,6 +10,10 @@ vi.mock('tone', () => ({
     connect = connect;
     close = close;
   },
+  Meter: class {
+    getValue() { return -24; }
+    dispose() {}
+  },
   context: {
     createMediaStreamDestination: () => ({ stream: {} }),
   },
@@ -52,6 +56,7 @@ describe('MicRecorder', () => {
     const recorder = new MicRecorder();
 
     await recorder.start();
+    expect(recorder.getInputLevelDb()).toBe(-24);
     const result = await recorder.stop();
 
     expect(result).toEqual({
@@ -60,7 +65,7 @@ describe('MicRecorder', () => {
       durationSeconds: 2.5,
     });
     expect(open).toHaveBeenCalledOnce();
-    expect(connect).toHaveBeenCalledOnce();
+    expect(connect).toHaveBeenCalledTimes(2);
     expect(close).toHaveBeenCalledOnce();
     now.mockRestore();
   });

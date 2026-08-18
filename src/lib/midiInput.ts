@@ -61,15 +61,25 @@ export class MidiCapture {
 
 export async function connectMidiInputs(
   onMessage: (data: Uint8Array) => void,
+  deviceId?: string,
 ): Promise<() => void> {
   const requestMIDIAccess = (navigator as Navigator & {
-    requestMIDIAccess?: () => Promise<{ inputs: Map<unknown, { onmidimessage: ((event: { data: Uint8Array }) => void) | null }> }>;
+    requestMIDIAccess?: () => Promise<{ inputs: Map<unknown, { id: string; onmidimessage: ((event: { data: Uint8Array }) => void) | null }> }>;
   }).requestMIDIAccess;
   if (!requestMIDIAccess) throw new Error('Web MIDI is not supported by this browser');
 
   const access = await requestMIDIAccess.call(navigator);
-  const inputs = [...access.inputs.values()];
-  if (inputs.length === 0) throw new Error('No MIDI input device is available');
+  const allInputs = [...access.inputs.values()];
+
+  let inputs: typeof allInputs;
+  if (deviceId != null) {
+    inputs = allInputs.filter(input => input.id === deviceId);
+    if (inputs.length === 0) throw new Error(`MIDI input device "${deviceId}" not found`);
+  } else {
+    inputs = allInputs;
+    if (inputs.length === 0) throw new Error('No MIDI input device is available');
+  }
+
   for (const input of inputs) {
     input.onmidimessage = event => onMessage(event.data);
   }

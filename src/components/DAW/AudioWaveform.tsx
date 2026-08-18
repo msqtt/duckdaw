@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { decodedAudioCache } from '../../lib/decodedAudioCache';
 
 export function AudioWaveform({ url }: { url?: string }) {
    const [peaks, setPeaks] = useState<number[]>([]);
@@ -12,38 +13,39 @@ export function AudioWaveform({ url }: { url?: string }) {
        }
        
        let isCancelled = false;
-       const ctx = new window.AudioContext();
-       fetch(url)
-         .then(res => res.arrayBuffer())
-         .then(buf => ctx.decodeAudioData(buf))
+       decodedAudioCache.acquire(url)
          .then(audioBuf => {
              if (isCancelled) return;
              const channelData = audioBuf.getChannelData(0);
-             const step = Math.ceil(channelData.length / 80); // higher res
+             const step = Math.max(1, Math.ceil(channelData.length / 80));
              const p = [];
              for(let i=0; i<80; i++) {
                  let min = 1.0;
                  let max = -1.0;
-                 for (let j=0; j<step; j++) {
-                     const val = channelData[i*step + j];
+                 const start = i * step;
+                 const end = Math.min(channelData.length, start + step);
+                 for (let j=start; j<end; j++) {
+                     const val = channelData[j];
                      if (val < min) min = val;
                      if (val > max) max = val;
                  }
                  p.push(Math.max(10, Math.abs(max - min) * 100));
              }
              setPeaks(p);
-             ctx.close();
          })
-         .catch((err) => {
+         .catch(() => {
              if(!isCancelled) {
                  const p = [];
                  for(let i=0; i<80; i++) p.push(20 + (Math.sin(i * 0.5) * 40 + 40));
                  setPeaks(p);
              }
-             ctx.close();
          });
          
-       return () => { isCancelled = true; };
+       return () => {
+         isCancelled = true;
+         decodedAudioCache.release(url);
+         decodedAudioCache.evictReleased();
+       };
    }, [url]);
 
    return (

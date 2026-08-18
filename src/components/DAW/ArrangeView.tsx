@@ -1,4 +1,4 @@
-import { useDAWStore, Track, Clip } from '../../store/dawStore';
+import { useDAWStore, Track, Clip, type FadeCurve } from '../../store/dawStore';
 import { Volume2, VolumeX, Headphones, Plus, Trash2, Edit2, Music, Mic, ChevronLeft, ChevronRight } from 'lucide-react';
 import React, { useRef, useState, useEffect } from 'react';
 import * as Tone from 'tone';
@@ -6,6 +6,8 @@ import { Dropdown } from '../ui/Dropdown';
 import toast from 'react-hot-toast';
 import { beatsToTransportPosition } from '../../lib/time';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { filterVisibleClips, getVisibleBeatRange } from '../../lib/virtualTimeline';
+import { requestDecision } from '../../lib/decisionService';
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
@@ -14,7 +16,7 @@ import { ClipItem, currentDragContext, setDragContext } from './ClipItem';
 import { useShallow } from 'zustand/react/shallow';
 
 export function ArrangeView() {
-  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, timeSignature, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop, markers, addMarker, updateMarker, deleteMarker, activeArrangementId } = useDAWStore(useShallow(state => ({
+  const { tracks, clips, addTrack, addClip, selectedTrackId, zoom, setZoom, updateClip, duplicateClip, splitClipAtBeat, trimClipStart, trimClipEnd, setClipGain, setClipFade, toggleClipReverse, selectClip, selectedClipIds, deleteClip, deleteTrack, snapGridSize, snapToGrid, timeSignature, loopStart, loopEnd, setLoopRegion, isLooping, toggleLoop, markers, addMarker, updateMarker, deleteMarker, activeArrangementId } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
       clips: state.clips,
       addTrack: state.addTrack,
@@ -24,6 +26,12 @@ export function ArrangeView() {
       setZoom: state.setZoom,
       updateClip: state.updateClip,
       duplicateClip: state.duplicateClip,
+      splitClipAtBeat: state.splitClipAtBeat,
+      trimClipStart: state.trimClipStart,
+      trimClipEnd: state.trimClipEnd,
+      setClipGain: state.setClipGain,
+      setClipFade: state.setClipFade,
+      toggleClipReverse: state.toggleClipReverse,
       selectClip: state.selectClip,
       selectedClipIds: state.selectedClipIds,
       deleteClip: state.deleteClip,
@@ -44,6 +52,8 @@ export function ArrangeView() {
   })));
   const PIXELS_PER_BEAT = zoom;
   const activeClips = clips.filter(clip => clip.arrangementId === activeArrangementId);
+  const [visibleBeatRange, setVisibleBeatRange] = useState({ startBeat: 0, endBeat: 64 });
+  const visibleClips = filterVisibleClips(activeClips, visibleBeatRange);
   const SNAP = snapToGrid ? snapGridSize : 0.015625; 
   const VISUAL_SNAP = snapGridSize;
   const totalBeats = 1000; // Large timeline
@@ -67,6 +77,26 @@ export function ArrangeView() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'track' | 'clip', id: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const updateVisibleBeatRange = (container: HTMLDivElement) => {
+    setVisibleBeatRange(getVisibleBeatRange({
+      scrollLeft: container.scrollLeft,
+      viewportWidth: container.clientWidth,
+      pixelsPerBeat: PIXELS_PER_BEAT,
+      overscanBeats: 8,
+    }));
+  };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    updateVisibleBeatRange(container);
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => updateVisibleBeatRange(container))
+      : null;
+    observer?.observe(container);
+    return () => observer?.disconnect();
+  }, [PIXELS_PER_BEAT]);
 
   useEffect(() => {
     const handleDragEndGlobal = () => {
@@ -106,6 +136,7 @@ export function ArrangeView() {
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest('[data-testid="track-lane"]') && e.detail > 1) return;
       if ((e.target as HTMLElement).closest('.cursor-grab')) return; // Ignored if started on clip
       if (e.button !== 0) return; // Only left click // <--- actually maybe we should skip right click context menu from here! Oh it's restricted to left click. Good.
       if (!containerRef.current) return;
@@ -113,11 +144,11 @@ export function ArrangeView() {
       const x = e.clientX - rect.left + containerRef.current.scrollLeft;
       const y = e.clientY - rect.top + containerRef.current.scrollTop;
       setMarquee({ xA: x, yA: y, xB: x, yB: y });
-      e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
       if (!marquee || !containerRef.current) return;
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.setPointerCapture(e.pointerId);
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + containerRef.current.scrollLeft;
       const y = e.clientY - rect.top + containerRef.current.scrollTop;
@@ -126,7 +157,7 @@ export function ArrangeView() {
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
       if (!marquee) return;
-      e.currentTarget.releasePointerCapture(e.pointerId);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       
       const left = Math.min(marquee.xA, marquee.xB);
       const right = Math.max(marquee.xA, marquee.xB);
@@ -305,6 +336,7 @@ export function ArrangeView() {
             <span className="text-xs font-bold text-neutral-600 dark:text-neutral-400">TRACKS</span>
             <div className="flex gap-1 flex-shrink-0">
                 <Dropdown
+                   ariaLabel="Add track"
                    options={[
                      { value: 'midi', label: 'MIDI Track', icon: <Music size={14} /> },
                      { value: 'audio', label: 'Audio Track', icon: <Mic size={14} /> }
@@ -399,6 +431,7 @@ export function ArrangeView() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onScroll={(e) => {
+            updateVisibleBeatRange(e.currentTarget);
             if (sidebarRef.current) {
                 sidebarRef.current.scrollTop = e.currentTarget.scrollTop;
             }
@@ -563,10 +596,18 @@ export function ArrangeView() {
                key={marker.id}
                className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-auto"
                style={{ left: `${marker.position * PIXELS_PER_BEAT - 6}px` }}
-               onDoubleClick={(event) => {
+               onDoubleClick={async (event) => {
                  event.stopPropagation();
-                 const name = window.prompt('Marker name:', marker.name);
-                 if (name?.trim()) updateMarker(marker.id, { name: name.trim() });
+                 const decision = await requestDecision({
+                   title: 'Rename marker',
+                   message: 'Enter a new marker name.',
+                   input: { label: 'Marker name', defaultValue: marker.name },
+                   options: [
+                     { id: 'cancel', label: 'Cancel', kind: 'secondary' },
+                     { id: 'rename', label: 'Rename', kind: 'primary', requiresValue: true },
+                   ],
+                 });
+                 if (decision?.choice === 'rename' && decision.value) updateMarker(marker.id, { name: decision.value });
                }}
                onContextMenu={(event) => {
                  event.preventDefault();
@@ -626,9 +667,39 @@ export function ArrangeView() {
                  style={{ top: `${dragTrackDropIndex * 96}px` }}
              />
           )}
+          {tracks.length === 0 && (
+            <div data-testid="empty-state-cta" className="flex flex-col items-center justify-center py-16 text-neutral-500 dark:text-neutral-400 gap-4">
+              <p className="text-sm">No tracks yet. Get started by adding one!</p>
+              <div className="flex gap-3">
+                <button
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium transition-colors"
+                  onPointerDown={event => event.stopPropagation()}
+                  onClick={() => addTrack('midi')}
+                >
+                  <Music size={16} /> Add MIDI Track
+                </button>
+                <button
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors"
+                  onPointerDown={event => event.stopPropagation()}
+                  onClick={() => addTrack('audio')}
+                >
+                  <Mic size={16} /> Add Audio Track
+                </button>
+              </div>
+            </div>
+          )}
+          {tracks.length > 0 && activeClips.length === 0 && (
+            <div data-testid="no-clips-hint" className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <p className="text-sm text-neutral-400 dark:text-neutral-500 bg-neutral-100/80 dark:bg-neutral-950/80 px-4 py-2 rounded-lg">
+                Double-click a track lane to create a clip
+              </p>
+            </div>
+          )}
           {tracks.map(t => (
             <div 
-                key={t.id} 
+                key={t.id}
+                data-testid="track-lane"
+                data-track-type={t.type}
                 className="h-24 border-b border-neutral-300 dark:border-neutral-800 relative bg-repeat"
                 style={{ backgroundImage: `url('data:image/svg+xml;utf8,${gridSVG}')`, backgroundSize: `${PIXELS_PER_BEAT * 4}px 96px` }}
                 onDoubleClick={(e) => handleTrackLaneDoubleClick(t.id, e)}
@@ -653,7 +724,7 @@ export function ArrangeView() {
                         }}
                     />
                 )}
-                {activeClips.filter(c => c.trackId === t.id).map(c => (
+                {visibleClips.filter(c => c.trackId === t.id).map(c => (
                     <ClipItem 
                         key={c.id} 
                         clip={c} 
@@ -663,7 +734,9 @@ export function ArrangeView() {
                             e.preventDefault();
                             e.stopPropagation();
                             selectClip(c.id);
-                            setContextMenu({ x: e.clientX, y: e.clientY, clipId: c.id });
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const beat = Math.round((c.start + (e.clientX - rect.left) / PIXELS_PER_BEAT) / SNAP) * SNAP;
+                            setContextMenu({ x: e.clientX, y: e.clientY, clipId: c.id, beat });
                         }}
                     />
                 ))}
@@ -684,12 +757,22 @@ export function ArrangeView() {
                     <>
                         <button
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
-                            onPointerDown={(event) => {
+                            onPointerDown={async (event) => {
                                 event.stopPropagation();
                                 const marker = markers.find(candidate => candidate.id === contextMenu.markerId);
-                                const name = window.prompt('Marker name:', marker?.name ?? 'Marker');
-                                if (name?.trim()) updateMarker(contextMenu.markerId!, { name: name.trim() });
                                 setContextMenu(null);
+                                const decision = await requestDecision({
+                                  title: 'Rename marker',
+                                  message: 'Enter a new marker name.',
+                                  input: { label: 'Marker name', defaultValue: marker?.name ?? 'Marker' },
+                                  options: [
+                                    { id: 'cancel', label: 'Cancel', kind: 'secondary' },
+                                    { id: 'rename', label: 'Rename', kind: 'primary', requiresValue: true },
+                                  ],
+                                });
+                                if (decision?.choice === 'rename' && decision.value) {
+                                  updateMarker(contextMenu.markerId!, { name: decision.value });
+                                }
                             }}
                         >
                             Rename
@@ -717,6 +800,78 @@ export function ArrangeView() {
                     </>
                 ) : contextMenu.clipId ? (
                     <>
+                        <button
+                            className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white disabled:opacity-40"
+                            disabled={contextMenu.beat == null}
+                            onPointerDown={(event) => {
+                                event.stopPropagation();
+                                if (contextMenu.beat != null) splitClipAtBeat(contextMenu.clipId!, contextMenu.beat);
+                                setContextMenu(null);
+                            }}
+                        >
+                            Split here
+                        </button>
+                        {clips.find(clip => clip.id === contextMenu.clipId)?.type === 'audio' && (
+                          <>
+                            <button
+                              className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                              onPointerDown={async event => {
+                                event.stopPropagation();
+                                const clipId = contextMenu.clipId!;
+                                const clip = clips.find(candidate => candidate.id === clipId)!;
+                                setContextMenu(null);
+                                const decision = await requestDecision({
+                                  title: 'Clip gain', message: 'Set non-destructive clip gain from -60 dB to +24 dB.',
+                                  input: { label: 'Gain (dB)', defaultValue: String(clip.audioEdit?.gainDb ?? 0) },
+                                  options: [{ id: 'cancel', label: 'Cancel' }, { id: 'apply', label: 'Apply', kind: 'primary', requiresValue: true }],
+                                });
+                                const gain = Number(decision?.value);
+                                if (decision?.choice === 'apply' && Number.isFinite(gain)) setClipGain(clipId, gain);
+                              }}
+                            >Clip gain…</button>
+                            {(['in', 'out'] as const).map(edge => (
+                              <button
+                                key={edge}
+                                className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                                onPointerDown={async event => {
+                                  event.stopPropagation();
+                                  const clipId = contextMenu.clipId!;
+                                  const clip = clips.find(candidate => candidate.id === clipId)!;
+                                  const current = edge === 'in' ? clip.audioEdit?.fadeInBeats : clip.audioEdit?.fadeOutBeats;
+                                  const currentCurve = edge === 'in' ? clip.audioEdit?.fadeInCurve : clip.audioEdit?.fadeOutCurve;
+                                  setContextMenu(null);
+                                  const decision = await requestDecision({
+                                    title: `Fade ${edge}`, message: 'Set the fade length in beats and choose its curve.',
+                                    input: { label: 'Beats', defaultValue: String(current ?? 0) },
+                                    options: [
+                                      { id: 'cancel', label: 'Cancel' },
+                                      ...([
+                                        ['linear', 'Linear'],
+                                        ['exponential', 'Exponential'],
+                                        ['sCurve', 'S-curve'],
+                                        ['logarithmic', 'Logarithmic'],
+                                      ] as const).map(([id, label]) => ({
+                                        id, label, kind: id === (currentCurve ?? 'linear') ? 'primary' as const : 'secondary' as const, requiresValue: true,
+                                      })),
+                                    ],
+                                  });
+                                  const beats = Number(decision?.value);
+                                  if (decision && decision.choice !== 'cancel' && Number.isFinite(beats)) {
+                                    setClipFade(clipId, edge, beats, decision.choice as FadeCurve);
+                                  }
+                                }}
+                              >Fade {edge}…</button>
+                            ))}
+                            <button
+                              className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
+                              onPointerDown={event => {
+                                event.stopPropagation();
+                                toggleClipReverse(contextMenu.clipId!);
+                                setContextMenu(null);
+                              }}
+                            >{clips.find(clip => clip.id === contextMenu.clipId)?.audioEdit?.reversed ? 'Restore forward' : 'Reverse'}</button>
+                          </>
+                        )}
                         <button 
                             className="w-full text-left px-4 py-1.5 hover:bg-emerald-500 hover:text-white"
                             onPointerDown={(e) => {
@@ -799,6 +954,8 @@ export function ArrangeView() {
               type="range"
               min="5" max="80"
               value={zoom}
+              aria-label="Timeline zoom"
+              aria-valuetext={`${zoom} pixels per beat`}
               onChange={e => setZoom(parseInt(e.target.value))}
               className="w-24 accent-emerald-500 h-1 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full"
            />

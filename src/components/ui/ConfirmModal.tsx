@@ -24,6 +24,44 @@ export function ConfirmModal({
   isDestructive = true,
 }: ConfirmModalProps) {
   const titleId = React.useId();
+  const descriptionId = React.useId();
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusable = () => [...(dialog?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    ) ?? [])];
+    queueMicrotask(() => focusable()[0]?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -36,9 +74,11 @@ export function ConfirmModal({
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
           />
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}
+            aria-describedby={descriptionId}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -58,7 +98,7 @@ export function ConfirmModal({
               </button>
             </div>
             
-            <div className="p-4 text-sm text-neutral-600 dark:text-neutral-400">
+            <div id={descriptionId} className="p-4 text-sm text-neutral-600 dark:text-neutral-400">
               {message}
             </div>
             

@@ -1,0 +1,54 @@
+name: Staging smoke
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BASE_URL: https://daw-sit.msqt.fun
+      EXPECTED_COMMIT: ${{ github.sha }}
+      EXPECTED_CONTEXT: staging
+      EXPECTED_BRANCH: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Wait for Netlify staging branch deploy
+        run: |
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error --location --max-time 20 "$PLAYWRIGHT_BASE_URL" | grep -q 'DuckDAW'; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo 'Timed out waiting for daw-sit.msqt.fun staging deploy' >&2
+          exit 1
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run test:e2e -- --project=${{ matrix.browser }} --grep @smoke
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-smoke-${{ matrix.browser }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

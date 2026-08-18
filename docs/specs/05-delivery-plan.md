@@ -85,11 +85,10 @@
 6. 功能规格、审计矩阵和测试追踪无过期现状；
 7. 独立审查提出的候选缺口逐项回查源码，真实缺口修复，误报以精确代码证据关闭。
 
-## 6. 后续规划（不属于当前 33 条验收）
-- 标准 MIDI 文件导入导出；
-- OAuth/PKCE 托管部署与 GitHub 冲突历史；
-- Automation、Tempo Track UI、总线/编组/发送；
-- 音频裁切、fade、stretch；
-- 大型工程基准、浏览器矩阵和端到端视觉/键盘回归。
+## 6. 下一代优化交付状态
+
+[`07-next-generation-optimization.md`](./07-next-generation-optimization.md) 中的 Batch A–F 已按 SDD/TDD 完成候选实现。Batch E 的 Tempo/Automation、v2 格式、Bus/Send DAG、共享实时/离线 Mix Graph 与 export tail/normalize/limiter/stems 已由领域、Store、音频和集成测试覆盖；Batch F 的 GitHub baseline/409 事务、依赖治理、CI/CD、部署 metadata 和真实浏览器工作流已完成。
+
+`0.3.0-rc.1` 本地候选证据：42 个 Vitest 文件、278 项测试通过；Chromium/Firefox/WebKit Playwright 组合矩阵 18/18 通过；TypeScript no-emit、生产构建、冻结 bundle budget、`npm audit`（0 vulnerabilities）和 `git diff --check` 通过；独立发布审查及 FFmpeg GPL notice 复审确认无未关闭 P0/P1。远端 CI、Netlify staging branch deploy、`daw-sit.msqt.fun` DNS/TLS/metadata/SPA/cache smoke 属于提交后的 staging 门禁，必须记录实际远端结果后才可声明预发部署完成。
 
 历史资料仍按 `docs/specs/README.md` 的权威顺序处理，不覆盖本矩阵。

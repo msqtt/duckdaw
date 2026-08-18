@@ -4,7 +4,7 @@ import { createTrackMixSettings } from './mixSettings';
 const baseTrack = {
   id: 'track-1', name: 'Track', type: 'midi' as const,
   volume: 0.5, pan: -0.25, isMuted: true, isSolo: false,
-  instrument: 'synth' as const, color: '#fff', reverb: 0.4, delay: 0.2,
+  instrument: 'synth' as const, color: '#fff', reverb: 0.4, delay: 0.2, automationLanes: [],
 };
 
 describe('shared realtime/offline mix settings', () => {

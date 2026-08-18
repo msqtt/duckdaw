@@ -1,6 +1,6 @@
 # DuckDAW Specs
 
-> 基线：当前工作树；核对日期：2026-08-17。本文档集是 DuckDAW 产品行为、技术约束与交付验收的当前规范。
+> 基线：当前工作树；核对日期：2026-08-18。本文档集是 DuckDAW 产品行为、技术约束与交付验收的当前规范。
 
 ## 1. 文档地图
 
@@ -9,9 +9,10 @@
 | [01-product.md](./01-product.md) | 产品目标、用户、范围与成功标准 | 产品、设计、开发 |
 | [02-functional-requirements.md](./02-functional-requirements.md) | 带编号的功能需求和验收标准 | 产品、开发、测试 |
 | [03-technical-design.md](./03-technical-design.md) | 架构、状态模型、数据流与工程约束 | 开发、评审者 |
-| [04-project-format.md](./04-project-format.md) | `.duckdaw` v1.1.0 文件格式和兼容规则 | 开发、集成方 |
+| [04-project-format.md](./04-project-format.md) | `.duckdaw` v2.0.0 文件格式和 v1.x 兼容迁移规则 | 开发、集成方 |
 | [05-delivery-plan.md](./05-delivery-plan.md) | 实现差距、优先级、追踪矩阵与 Definition of Done | 维护者、测试 |
 | [06-compliance-audit.md](./06-compliance-audit.md) | 33 条需求代码审计与 SDD/TDD 实施基线 | 维护者、开发、测试 |
+| [07-next-generation-optimization.md](./07-next-generation-optimization.md) | 性能、交互、专业编辑、E2E 与 Cloudflare 双环境的执行规格 | 产品、开发、运维、测试 |
 
 ## 2. 权威性
 
@@ -20,8 +21,9 @@
 1. `docs/specs/04-project-format.md` 对工程文件格式具有最高优先级；
 2. `docs/specs/02-functional-requirements.md` 对用户可见行为具有最高优先级；
 3. `docs/specs/03-technical-design.md` 约束实现方式和不变量；
-4. `docs/specs/05-delivery-plan.md` 记录现状，不改变目标需求；
-5. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
+4. `docs/specs/07-next-generation-optimization.md` 对下一代增量需求、性能预算和发布拓扑具有最高优先级；
+5. `docs/specs/05-delivery-plan.md` 记录已交付基线，不改变目标需求；
+6. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
 
 若代码与规范不一致，不应静默修改规范以迎合缺陷；应在交付计划中记录差距，并决定修代码或显式变更需求。
 
@@ -58,6 +60,4 @@
 
 ## 6. 当前实现摘要
 
-当前可用主路径包括：浏览器内 MIDI/Audio 多轨编排、钢琴卷帘编辑、音频导入与麦克风录音、基础混音和效果、传输/循环/节拍器、离线音频导出、`.duckdaw` ZIP 保存加载、最近项目、GitHub 同步、标记和主题。
-
-主要已知偏差包括：工程包仍缺少严格 schema/版本校验；无 IndexedDB 恢复快照；模板保存的是完整工程而非结构模板；Arrangement 不隔离片段；MIDI 录音未采集输入；撤销仅追踪 `tracks`、`clips`、`bpm`。详见 `05-delivery-plan.md`。
+当前 33 条基础功能需求及 `07-next-generation-optimization.md` 的 Batch A–F 已完成候选代码、自动化测试和独立审查闭环。`0.3.0-rc.1` 已通过本地 unit/integration、Chromium/Firefox/WebKit E2E、typecheck、build、bundle、audit 与 diff gates；提交后的远端 CI、Netlify `staging` branch deploy 和 `daw-sit.msqt.fun` 环境独立性仍须以实际部署 metadata、DNS/TLS、SPA/cache 和 smoke 结果验收。

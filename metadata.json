@@ -1,6 +1,5 @@
 {
   "name": "DuckDAW",
   "description": "A cute, browser-based Digital Audio Workstation for music production and sequencing",
-  "requestFramePermissions": ["microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": ["microphone"]
 }

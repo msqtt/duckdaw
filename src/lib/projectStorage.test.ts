@@ -68,7 +68,7 @@ describe('Project Storage (DuckDAW format)', () => {
     
     const manifest = JSON.parse(manifestStr!);
     expect(manifest.format).toBe('duckdaw');
-    expect(manifest.version).toBe('1.1.0');
+    expect(manifest.version).toBe('2.0.0');
     expect(manifest.name).toBe('Test Project');
     expect(manifest.description).toBe('A test project');
 
@@ -76,7 +76,7 @@ describe('Project Storage (DuckDAW format)', () => {
     expect(projectStr).toBeDefined();
     
     const projectData = JSON.parse(projectStr!);
-    expect(projectData.meta.version).toBe('1.1.0');
+    expect(projectData.meta.version).toBe('2.0.0');
     expect(projectData.transport.bpm).toBe(125);
     expect(projectData.tracks.length).toBe(2);
     expect(projectData.tracks[0].name).toBe('Bass');
@@ -168,6 +168,10 @@ describe('Project Storage (DuckDAW format)', () => {
     const audioClip = projectData.clips.find((c: any) => c.type === 'audio');
     expect(audioClip.bufferUrl).toBe('samples/clip-2.webm');
     
+    expect(audioClip.audioEdit).toEqual({
+      sourceOffsetSeconds: 0, gainDb: 0, fadeInBeats: 0, fadeOutBeats: 0,
+      fadeInCurve: 'linear', fadeOutCurve: 'linear', reversed: false,
+    });
     // Check sample file in zip
     const sampleData = await loadedZip.file('samples/clip-2.webm')?.async('arraybuffer');
     expect(sampleData).toBeDefined();
@@ -182,6 +186,9 @@ describe('Project Storage (DuckDAW format)', () => {
     expect(audioClip).toBeDefined();
     expect(audioClip.bufferUrl).toBe('blob:mock-url'); // Since we mocked createObjectURL
     expect(audioClip.mimeType).toBe('audio/webm');
+    expect(audioClip.audioEdit).toMatchObject({
+      sourceOffsetSeconds: 0, gainDb: 0, fadeInBeats: 0, fadeOutBeats: 0, reversed: false,
+    });
     expect(pkg.samples.size).toBe(1);
   });
 });
@@ -209,7 +216,7 @@ describe('Project Storage (DuckDAW format)', () => {
     const zip = new JSZip();
     zip.file('manifest.json', JSON.stringify({
       format: 'duckdaw',
-      version: '2.0.0',
+      version: '3.0.0',
       projectId: 'future-project',
       name: 'Future',
       bpm: 120,
@@ -217,7 +224,7 @@ describe('Project Storage (DuckDAW format)', () => {
       resources: { samples: [], presets: [] },
     }));
     zip.file('project.json', JSON.stringify({
-      meta: { version: '2.0.0', projectId: 'future-project' },
+      meta: { version: '3.0.0', projectId: 'future-project' },
       transport: { bpm: 120, timeSignature: [4, 4] },
       tracks: [], clips: [], markers: [],
       arrangements: [{ id: 'main', name: 'Main' }],
@@ -292,11 +299,95 @@ it('accepts a minimal valid legacy JSON project with migration defaults', () => 
     bpm: 120,
     tracks: [{
       id: 'legacy-track', name: 'Legacy', type: 'midi', volume: 0.8, pan: 0,
-      isMuted: false, isSolo: false, instrument: 'synth', color: '#fff', reverb: 0, delay: 0,
+      isMuted: false, isSolo: false, instrument: 'synth', color: '#fff', reverb: 0, delay: 0, automationLanes: [],
     }],
     clips: [{
       id: 'legacy-clip', trackId: 'legacy-track', arrangementId: 'main', type: 'midi',
       start: 0, duration: 4, notes: [],
     }],
   })).not.toThrow();
+});
+
+
+it('rejects v1.2 audio fades longer than the clip', () => {
+  const base = {
+    bpm: 120,
+    tracks: [{
+      id: 'audio-track', name: 'Audio', type: 'audio' as const, volume: 0.8, pan: 0,
+      isMuted: false, isSolo: false, color: '#fff', reverb: 0, delay: 0, automationLanes: [],
+    }],
+    markers: [], arrangements: [{ id: 'main', name: 'Main' }], activeArrangementId: 'main',
+  };
+  expect(() => validatePersistedProjectState({
+    ...base,
+    clips: [{
+      id: 'audio', trackId: 'audio-track', arrangementId: 'main', type: 'audio',
+      start: 0, duration: 4, notes: [],
+      audioEdit: {
+        sourceOffsetSeconds: 0, gainDb: 0, fadeInBeats: 3, fadeOutBeats: 2,
+        fadeInCurve: 'linear', fadeOutCurve: 'linear', reversed: false,
+      },
+    }],
+  })).toThrow(/audio edit/i);
+});
+
+
+it('rejects duplicate tempo beats in a v2 package before returning project state', async () => {
+  const blob = await createDuckDawPackage('Invalid Tempo');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const project = JSON.parse(await zip.file('project.json')!.async('text'));
+  project.tempoTrack = [
+    { id: 'tempo-a', beat: 0, bpm: 120, curve: 'step' },
+    { id: 'tempo-b', beat: 0, bpm: 90, curve: 'linear' },
+  ];
+  zip.file('project.json', JSON.stringify(project));
+
+  await expect(loadDuckDawPackage(await zip.generateAsync({ type: 'blob' })))
+    .rejects.toThrow(/tempo/i);
+});
+
+it('rejects invalid track automation in a v2 package before returning project state', async () => {
+  const blob = await createDuckDawPackage('Invalid Automation');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const project = JSON.parse(await zip.file('project.json')!.async('text'));
+  project.tracks[0].automationLanes = [{
+    id: 'lane-1',
+    target: 'volume',
+    enabled: true,
+    points: [{ id: 'point-1', beat: 0, value: 2, curve: 'linear' }],
+  }];
+  zip.file('project.json', JSON.stringify(project));
+
+  await expect(loadDuckDawPackage(await zip.generateAsync({ type: 'blob' })))
+    .rejects.toThrow(/automation/i);
+});
+
+
+it('migrates a v1.2 package to a beat-zero tempo point and Master Bus routing', async () => {
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify({
+    format: 'duckdaw', version: '1.2.0', projectId: 'legacy-v12',
+    name: 'Legacy v1.2', bpm: 110, timeSignature: [4, 4],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    resources: { samples: [], presets: [] },
+  }));
+  zip.file('project.json', JSON.stringify({
+    meta: { version: '1.2.0', projectId: 'legacy-v12' },
+    transport: { bpm: 110, timeSignature: [4, 4] },
+    master: { volume: 0.8 },
+    tracks: [{
+      id: 'legacy-track', name: 'Legacy', type: 'midi', volume: 0.8, pan: 0,
+      isMuted: false, isSolo: false, instrument: 'synth', color: '#fff',
+      reverb: 0, delay: 0, automationLanes: [],
+    }],
+    clips: [], markers: [],
+    arrangements: [{ id: 'main', name: 'Main' }], activeArrangementId: 'main',
+    tempoTrack: [{ position: 0, bpm: 110, curve: 'step' }],
+  }));
+
+  const loaded = await loadDuckDawPackage(await zip.generateAsync({ type: 'blob' }));
+  expect(loaded.project.tempoTrack).toEqual([{ id: 'tempo-0', beat: 0, bpm: 110, curve: 'step' }]);
+  expect(loaded.project.buses).toEqual([expect.objectContaining({ id: 'master', outputBusId: null })]);
+  expect(loaded.project.tracks[0].outputBusId).toBe('master');
+  expect(loaded.project.sends).toEqual([]);
 });

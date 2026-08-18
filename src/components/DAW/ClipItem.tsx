@@ -10,14 +10,18 @@ export function setDragContext(val: any) { currentDragContext = val; }
 export function handleClipDragEnd() { currentDragContext = null; }
 
 function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: { clip: Clip, trackColor: string, onContextMenu?: React.MouseEventHandler, key?: React.Key, onDeletePrompt?: (type: 'track'|'clip', id: string) => void }) {
-  const { selectClip, selectedClipIds, updateClip, deleteClip, zoom, snapToGrid, snapGridSize } = useDAWStore(useShallow(state => ({
+  const { selectClip, selectedClipIds, updateClip, trimClipStart, trimClipEnd, deleteClip, zoom, bpm, snapToGrid, snapGridSize, switchTake } = useDAWStore(useShallow(state => ({
     selectClip: state.selectClip,
     selectedClipIds: state.selectedClipIds,
     updateClip: state.updateClip,
+    trimClipStart: state.trimClipStart,
+    trimClipEnd: state.trimClipEnd,
     deleteClip: state.deleteClip,
     zoom: state.zoom,
+    bpm: state.bpm,
     snapToGrid: state.snapToGrid,
-    snapGridSize: state.snapGridSize
+    snapGridSize: state.snapGridSize,
+    switchTake: state.switchTake,
   })));
   
   const isSelected = selectedClipIds.includes(clip.id);
@@ -53,6 +57,10 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
 
   return (
     <div
+      data-testid="clip-item"
+      data-clip-type={clip.type}
+      data-reversed={clip.type === 'audio' ? String(Boolean(clip.audioEdit?.reversed)) : undefined}
+      data-gain-db={clip.type === 'audio' ? String(clip.audioEdit?.gainDb ?? 0) : undefined}
       draggable={!isEditing}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
@@ -61,7 +69,7 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
           e.stopPropagation();
           useDAWStore.getState().setBottomPanel('piano-roll');
       }}
-      className={`absolute h-20 top-2 rounded-md border-2 overflow-hidden cursor-grab active:cursor-grabbing ${isSelected ? 'border-white z-10 shadow-lg' : 'border-transparent shadow-sm'}`}
+      className={`group absolute h-20 top-2 rounded-md border-2 overflow-hidden cursor-grab active:cursor-grabbing ${isSelected ? 'border-white z-10 shadow-lg' : 'border-transparent shadow-sm'}`}
       style={{
         left: `${clip.start * PIXELS_PER_BEAT}px`,
         width: `${clip.duration * PIXELS_PER_BEAT}px`,
@@ -74,7 +82,7 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
           else selectClip(clip.id); 
       }}
     >
-        <div className="px-2 py-1 text-xs font-bold text-black/60 truncate flex justify-between items-center group relative z-10">
+        <div className="px-2 py-1 text-xs font-bold text-black/60 truncate flex justify-between items-center relative z-10">
             {isEditing ? (
                 <input 
                     autoFocus
@@ -102,6 +110,7 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
             )}
             {!isEditing && (
                 <button 
+                    aria-label={`Delete ${clip.name || (clip.type === 'midi' ? 'MIDI Clip' : 'Audio Clip')}`}
                     onClick={(e) => { 
                         e.stopPropagation(); 
                         if (onDeletePrompt) onDeletePrompt('clip', clip.id);
@@ -111,6 +120,23 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
                 >
                     <Trash2 size={12} />
                 </button>
+            )}
+            {/* Takes selector */}
+            {clip.takes && clip.takes.length > 1 && !isEditing && (
+                <select
+                    value={clip.activeTakeId || ''}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      switchTake(clip.id, e.target.value);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="opacity-0 group-hover:opacity-100 ml-1 text-[9px] bg-black/30 text-white border-none rounded px-0.5 cursor-pointer max-w-16"
+                    aria-label="Switch take"
+                >
+                    {clip.takes.map(take => (
+                      <option key={take.id} value={take.id}>{take.name}</option>
+                    ))}
+                </select>
             )}
         </div>
         {/* Draw miniature notes if midi */}
@@ -137,14 +163,27 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
         
         {clip.type === 'audio' && (
             <div className="absolute inset-x-0 bottom-2 top-6 flex items-center justify-start opacity-30 pointer-events-none overflow-hidden">
-                 <div style={{ width: clip.originalDuration ? `${(clip.originalDuration / clip.duration) * 100}%` : '100%', height: '100%', left: 0, position: 'absolute' }}>
+                 <div style={{
+                   width: clip.originalDuration ? `${(clip.originalDuration / clip.duration) * 100}%` : '100%',
+                   height: '100%',
+                   left: clip.originalDuration
+                     ? `${-((clip.audioEdit?.sourceOffsetSeconds ?? 0) * bpm / 60 / clip.duration) * 100}%`
+                     : 0,
+                   position: 'absolute',
+                   transform: clip.audioEdit?.reversed ? 'scaleX(-1)' : undefined,
+                 }}>
                      <AudioWaveform url={clip.bufferUrl} />
                  </div>
+                 {(clip.audioEdit?.fadeInBeats ?? 0) > 0 && (
+                   <div className="absolute inset-y-0 left-0 bg-black/40" style={{ width: `${Math.min(100, clip.audioEdit!.fadeInBeats / clip.duration * 100)}%`, clipPath: 'polygon(0 100%, 100% 0, 100% 100%)' }} />
+                 )}
+                 {(clip.audioEdit?.fadeOutBeats ?? 0) > 0 && (
+                   <div className="absolute inset-y-0 right-0 bg-black/40" style={{ width: `${Math.min(100, clip.audioEdit!.fadeOutBeats / clip.duration * 100)}%`, clipPath: 'polygon(0 0, 100% 100%, 0 100%)' }} />
+                 )}
             </div>
         )}
         
-        {/* Resize Handles */}
-        {clip.type !== 'audio' && (
+        {/* Resize / Trim Handles */}
         <div 
             draggable
             onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -155,27 +194,32 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
                 const startX = e.clientX;
                 const startBeat = clip.start;
                 const startDur = clip.duration;
+                let finalStart = startBeat;
                 
                 const onMove = (moveEvent: PointerEvent) => {
                     const diffPx = moveEvent.clientX - startX;
                     const diffBeats = diffPx / PIXELS_PER_BEAT;
                     const snappedDiff = Math.round(diffBeats / SNAP) * SNAP;
-                    
-                    if (startDur - snappedDiff > 0) {
-                       updateClip(clip.id, { start: startBeat + snappedDiff, duration: startDur - snappedDiff });
+                    const availableBeforeBeats = clip.type === 'audio'
+                      ? (clip.audioEdit?.sourceOffsetSeconds ?? 0) * bpm / 60
+                      : startBeat;
+                    const boundedDiff = Math.max(-Math.min(startBeat, availableBeforeBeats), snappedDiff);
+                    if (startDur - boundedDiff >= SNAP && Math.abs(boundedDiff) >= SNAP / 2) {
+                       finalStart = startBeat + boundedDiff;
+                       if (clip.type !== 'audio') updateClip(clip.id, { start: finalStart, duration: startDur - boundedDiff });
                     }
                 };
                 
-                const onUp = (upEvent: PointerEvent) => {
+                const onUp = () => {
                     window.removeEventListener('pointermove', onMove);
                     window.removeEventListener('pointerup', onUp);
+                    if (clip.type === 'audio' && Math.abs(finalStart - startBeat) >= SNAP / 2) trimClipStart(clip.id, finalStart);
                 };
                 
                 window.addEventListener('pointermove', onMove);
                 window.addEventListener('pointerup', onUp);
             }}
         />
-        )}
         <div 
             draggable
             onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -185,20 +229,26 @@ function ClipItemComponent({ clip, trackColor, onContextMenu, onDeletePrompt }: 
                 e.currentTarget.setPointerCapture(e.pointerId);
                 const startX = e.clientX;
                 const startDur = clip.duration;
+                let finalDuration = startDur;
                 
                 const onMove = (moveEvent: PointerEvent) => {
                     const diffPx = moveEvent.clientX - startX;
                     const diffBeats = diffPx / PIXELS_PER_BEAT;
                     let newDur = Math.max(SNAP, Math.round((startDur + diffBeats) / SNAP) * SNAP);
                     if (clip.type === 'audio' && clip.originalDuration) {
-                        newDur = Math.min(newDur, clip.originalDuration);
+                        const offsetBeats = (clip.audioEdit?.sourceOffsetSeconds ?? 0) * useDAWStore.getState().bpm / 60;
+                        newDur = Math.min(newDur, Math.max(SNAP, clip.originalDuration - offsetBeats));
                     }
-                    updateClip(clip.id, { duration: newDur });
+                    finalDuration = newDur;
+                    if (clip.type !== 'audio') updateClip(clip.id, { duration: newDur });
                 };
                 
-                const onUp = (upEvent: PointerEvent) => {
+                const onUp = () => {
                     window.removeEventListener('pointermove', onMove);
                     window.removeEventListener('pointerup', onUp);
+                    if (clip.type === 'audio' && Math.abs(finalDuration - startDur) >= SNAP / 2) {
+                      trimClipEnd(clip.id, clip.start + finalDuration);
+                    }
                 };
                 
                 window.addEventListener('pointermove', onMove);

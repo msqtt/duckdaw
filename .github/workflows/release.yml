@@ -1,0 +1,53 @@
+name: Verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Verified release tag (for example v0.3.0)
+        required: true
+        type: string
+      commit:
+        description: Exact production commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BASE_URL: https://daw.msqt.fun
+      EXPECTED_COMMIT: ${{ inputs.commit }}
+      EXPECTED_CONTEXT: production
+      EXPECTED_BRANCH: main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate release inputs
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ inputs.commit }}"
+          echo "${{ inputs.tag }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run check:size
+      - run: npm audit --audit-level=high
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --project=chromium --grep @smoke
+      - name: Create immutable tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "${{ inputs.tag }}" "${{ inputs.commit }}"
+          git push origin "${{ inputs.tag }}"
+          gh release create "${{ inputs.tag }}" --target "${{ inputs.commit }}" --title "DuckDAW ${{ inputs.tag }}" --generate-notes --verify-tag

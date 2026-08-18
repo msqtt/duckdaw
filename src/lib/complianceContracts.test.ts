@@ -19,7 +19,10 @@ describe('cross-component compliance contracts', () => {
     expect(settings).not.toContain("localStorage.setItem('github_token'");
     expect(settings).toContain('avoid using it on untrusted pages');
     expect(settings).toContain('Clear GitHub token');
-    expect(settings).toContain('res.status === 409');
+    expect(settings).toContain('saveGitHubProject');
+    const sync = source('./githubSync.ts');
+    expect(sync).toContain('error.status !== 409');
+    expect(sync).toContain('resolveGitHubConflict');
   });
 
   it('provides theme persistence and dynamic System-theme handling', () => {
@@ -50,5 +53,16 @@ describe('cross-component compliance contracts', () => {
       expect(modal).toContain('aria-modal="true"');
       expect(modal).toContain('aria-labelledby=');
     }
+  });
+
+  it('lazy-loads heavy panels and keeps FFmpeg resources same-origin', () => {
+    const app = source('../DAWApp.tsx');
+    const exportModal = source('../components/DAW/ExportModal.tsx');
+    expect(app).toContain("lazy(() => import('./components/DAW/PianoRoll')");
+    expect(app).toContain("lazy(() => import('./components/DAW/Mixer')");
+    expect(app).toContain("lazy(() => import('./components/DAW/ExportModal')");
+    expect(exportModal).toContain("from '@ffmpeg/core?url'");
+    expect(exportModal).toContain("from '@ffmpeg/core/wasm?url'");
+    expect(exportModal).not.toMatch(/https:\/\/unpkg\.com/);
   });
 });

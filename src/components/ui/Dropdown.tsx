@@ -17,6 +17,7 @@ export interface DropdownProps {
   align?: 'left' | 'right';
   className?: string;
   triggerClassName?: string;
+  ariaLabel?: string;
 }
 
 export function Dropdown({
@@ -27,7 +28,8 @@ export function Dropdown({
   disabled = false,
   align = 'left',
   className = '',
-  triggerClassName = 'flex items-center gap-1 hover:text-emerald-500 transition-colors'
+  triggerClassName = 'flex items-center gap-1 hover:text-emerald-500 transition-colors',
+  ariaLabel,
 }: DropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -49,6 +51,7 @@ export function Dropdown({
     <div className={`relative inline-flex text-left ${className}`} ref={containerRef}>
       <button
         type="button"
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         disabled={disabled}

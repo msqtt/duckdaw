@@ -13,6 +13,10 @@ vi.mock('tone', () => {
     chain() { return this; }
     toDestination() { return this; }
   }
+  class Gain extends BaseNode {
+    gain = { value: 1 };
+    dispose() {}
+  }
   class Channel extends BaseNode {
     volume = { value: 0 };
     pan = { value: 0 };
@@ -36,6 +40,7 @@ vi.mock('tone', () => {
     close() {}
   }
   return {
+    Gain,
     Channel,
     Meter,
     Reverb,
@@ -68,7 +73,7 @@ describe('AudioEngine resource lifecycle', () => {
     const track = {
       id: 'audio-1', name: 'Audio', type: 'audio' as const,
       volume: 0.8, pan: 0, isMuted: false, isSolo: false,
-      color: '#fff', reverb: 0.2, delay: 0.3,
+      color: '#fff', reverb: 0.2, delay: 0.3, automationLanes: [],
     };
 
     engine.syncTracks([track]);

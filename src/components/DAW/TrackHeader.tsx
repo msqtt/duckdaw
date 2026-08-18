@@ -23,6 +23,8 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
 
   return (
     <div 
+      data-testid="track-header"
+      data-track-type={track.type}
       draggable={!isEditing && canDrag}
       onDragStart={(e) => {
           if ((e.target as HTMLElement).tagName === 'INPUT') {
@@ -174,7 +176,9 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
             <span className="text-[10px] text-neutral-400 w-3">Vol</span>
             <input 
                 type="range" 
-                min="0" max="1" step="0.01" 
+                aria-label={`Volume ${track.name}`}
+               aria-valuetext={`${Math.round(track.volume * 100)}%`}
+               min="0" max="1" step="0.01"
                 value={track.volume}
                 onClick={e => e.stopPropagation()}
                 onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}

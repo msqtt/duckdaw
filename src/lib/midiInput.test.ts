@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { MidiCapture, midiNoteToName } from './midiInput';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { MidiCapture, midiNoteToName, connectMidiInputs } from './midiInput';
 
 describe('MIDI capture', () => {
   it('converts MIDI note numbers to note names', () => {
@@ -35,5 +35,50 @@ describe('MIDI capture', () => {
       ['E4', 1, 1],
       ['G4', 3, 1],
     ]);
+  });
+});
+
+describe('connectMidiInputs device selection (REC-PRO-01)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('connects only the specified device when deviceId is provided', async () => {
+    const input1 = { id: 'dev-1', onmidimessage: null };
+    const input2 = { id: 'dev-2', onmidimessage: null };
+    const inputs = new Map([['dev-1', input1], ['dev-2', input2]]);
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: vi.fn().mockResolvedValue({ inputs }),
+    });
+
+    const cb = vi.fn();
+    const disconnect = await connectMidiInputs(cb, 'dev-1');
+
+    expect(input1.onmidimessage).not.toBeNull();
+    expect(input2.onmidimessage).toBeNull();
+    disconnect();
+    expect(input1.onmidimessage).toBeNull();
+  });
+
+  it('throws when specified deviceId is not found', async () => {
+    const inputs = new Map([['dev-1', { id: 'dev-1', onmidimessage: null }]]);
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: vi.fn().mockResolvedValue({ inputs }),
+    });
+
+    await expect(connectMidiInputs(vi.fn(), 'missing-id')).rejects.toThrow(/not found/);
+  });
+
+  it('connects all devices when no deviceId is specified', async () => {
+    const input1 = { id: 'dev-1', onmidimessage: null };
+    const input2 = { id: 'dev-2', onmidimessage: null };
+    const inputs = new Map([['dev-1', input1], ['dev-2', input2]]);
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: vi.fn().mockResolvedValue({ inputs }),
+    });
+
+    await connectMidiInputs(vi.fn());
+    expect(input1.onmidimessage).not.toBeNull();
+    expect(input2.onmidimessage).not.toBeNull();
   });
 });

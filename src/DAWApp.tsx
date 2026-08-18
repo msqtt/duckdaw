@@ -3,16 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
 import { TopBar } from './components/DAW/TopBar';
 import { ArrangeView } from './components/DAW/ArrangeView';
-import { PianoRoll } from './components/DAW/PianoRoll';
-import { Mixer } from './components/DAW/Mixer';
-import { ExportModal } from './components/DAW/ExportModal';
+import { DecisionHost } from './components/ui/DecisionHost';
+import { ShortcutHelp } from './components/ui/ShortcutHelp';
+import { InputMeter } from './components/DAW/InputMeter';
 import { dawStore, useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
 import { MidiCapture, connectMidiInputs } from './lib/midiInput';
+import { MidiInputMeter } from './lib/midiInputMeter';
+import { computeCountIn, type CountInBars } from './lib/countIn';
+import { requestDecision } from './lib/decisionService';
 import { secondsToBeats, transportPositionToBeats } from './lib/time';
 import {
   clearRecoverySnapshot,
@@ -22,17 +25,61 @@ import {
   saveProject,
   saveRecoverySnapshot,
 } from './lib/projectStorage';
+import { useShallow } from 'zustand/react/shallow';
 import toast, { Toaster } from 'react-hot-toast';
 
+
+const PianoRoll = lazy(() => import('./components/DAW/PianoRoll').then(module => ({ default: module.PianoRoll })));
+const Mixer = lazy(() => import('./components/DAW/Mixer').then(module => ({ default: module.Mixer })));
+const ExportModal = lazy(() => import('./components/DAW/ExportModal').then(module => ({ default: module.ExportModal })));
 export default function DAWApp() {
-  const { tracks, clips, activeArrangementId, togglePlay, stop, bottomPanel, bpm, timeSignature, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isRecording, isMicRecording, isDirty } = useDAWStore();
+  const { tracks, clips, buses, sends, activeArrangementId, togglePlay, stop, bottomPanel, exportModalOpen, bpm, timeSignature, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isRecording, isMicRecording, tempoTrack } = useDAWStore(useShallow(state => ({
+    tracks: state.tracks,
+    clips: state.clips,
+    buses: state.buses,
+    sends: state.sends,
+    activeArrangementId: state.activeArrangementId,
+    togglePlay: state.togglePlay,
+    stop: state.stop,
+    bottomPanel: state.bottomPanel,
+    exportModalOpen: state.exportModalOpen,
+    bpm: state.bpm,
+    timeSignature: state.timeSignature,
+    isLooping: state.isLooping,
+    metronomeOn: state.metronomeOn,
+    metronomeSound: state.metronomeSound,
+    metronomeVolume: state.metronomeVolume,
+    metronomeSubdivisions: state.metronomeSubdivisions,
+    masterVolume: state.masterVolume,
+    loopStart: state.loopStart,
+    loopEnd: state.loopEnd,
+    isRecording: state.isRecording,
+    isMicRecording: state.isMicRecording,
+    tempoTrack: state.tempoTrack,
+  })));
   const [init, setInit] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const micRecordingStartBeat = useRef(0);
   const micRecordingTrackId = useRef<string | null>(null);
   const midiCapture = useRef(new MidiCapture());
   const midiDisconnect = useRef<(() => void) | null>(null);
   const midiRecordingTrackId = useRef<string | null>(null);
   const midiRecordingStartBeat = useRef(0);
+  const midiMeter = useRef(new MidiInputMeter());
+
+  // Count-in state
+  const [countInBars, setCountInBars] = useState<CountInBars>(() => {
+    const stored = localStorage.getItem('duckdaw_countin_bars');
+    return (stored === '0' || stored === '1' || stored === '2' || stored === '4') ? Number(stored) as CountInBars : 0;
+  });
+  const [countingIn, setCountingIn] = useState(false);
+  const [countInRemaining, setCountInRemaining] = useState(0);
+
+  // Input meter state
+  const [midiLevel, setMidiLevel] = useState(0);
+  const [midiPeak, setMidiPeak] = useState(0);
+  const [midiClipping, setMidiClipping] = useState(false);
+  const meterAnimRef = useRef<number>(0);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -82,6 +129,15 @@ export default function DAWApp() {
       } else if (e.code === 'Enter') {
          engine.stop();
          stop();
+      } else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.altKey && state.bottomPanel !== 'piano-roll') {
+         e.preventDefault();
+         const playheadBeat = Tone.Transport.ticks / Tone.Transport.PPQ;
+         state.selectedClipIds.forEach(id => {
+           const clip = state.clips.find(candidate => candidate.id === id);
+           if (clip && playheadBeat > clip.start && playheadBeat < clip.start + clip.duration) {
+             state.splitClipAtBeat(id, playheadBeat);
+           }
+         });
       } else if (e.code === 'Backspace' || e.code === 'Delete') {
          // Delete selected clips
          if (state.selectedClipIds.length > 0) {
@@ -179,6 +235,10 @@ export default function DAWApp() {
         } catch (err: any) {
           toast.error(`Load failed: ${err.message}`);
         }
+      } else if (e.key === '?' || e.key === 'F1') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        e.preventDefault();
+        setShortcutHelpOpen(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleGlobalShortcuts);
@@ -189,14 +249,22 @@ export default function DAWApp() {
     let active = true;
     getRecoverySnapshot().then(async (snapshot) => {
       if (!active || !snapshot) return;
-      const shouldRestore = window.confirm('A newer DuckDAW recovery snapshot is available. Restore it now?');
-      if (shouldRestore) {
+      const decision = await requestDecision({
+        title: 'Recovery snapshot found',
+        message: 'A newer DuckDAW recovery snapshot is available. Restore it, discard it, or keep it for later?',
+        options: [
+          { id: 'later', label: 'Later', kind: 'secondary' },
+          { id: 'discard', label: 'Discard', kind: 'danger' },
+          { id: 'restore', label: 'Restore', kind: 'primary' },
+        ],
+      });
+      if (!active || !decision || decision.choice === 'later') return;
+      if (decision.choice === 'restore') {
         await restoreRecoverySnapshot();
         if (active) toast.success('Recovered autosaved project');
         return;
       }
-      const shouldDiscard = window.confirm('Discard the recovery snapshot? Choose Cancel to keep it for later.');
-      if (shouldDiscard) await clearRecoverySnapshot();
+      if (decision.choice === 'discard') await clearRecoverySnapshot();
     }).catch((error) => {
       if (active) toast.error(`Recovery check failed: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -243,15 +311,24 @@ export default function DAWApp() {
   }, []);
 
   useEffect(() => {
-    // Sync state to audio engine
+    // Sync state to audio engine in dependency order.
     engine.syncTracks(tracks);
+    engine.syncRouting(tracks, buses, sends);
     engine.syncClips(clips.filter(clip => clip.arrangementId === activeArrangementId));
-  }, [tracks, clips, activeArrangementId]);
+  }, [tracks, clips, buses, sends, activeArrangementId]);
 
   useEffect(() => {
     engine.setBpm(bpm);
     engine.setTimeSignature(timeSignature);
   }, [bpm, timeSignature]);
+
+  useEffect(() => {
+    engine.syncTempoTrack(tempoTrack);
+  }, [tempoTrack]);
+
+  useEffect(() => {
+    engine.syncAutomation(tracks);
+  }, [tracks]);
 
   useEffect(() => {
     engine.setMetronome(metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions);
@@ -275,16 +352,61 @@ export default function DAWApp() {
           state.toggleRecording();
           return;
         }
+
+        // Compute count-in
+        const playheadBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
+        const countIn = computeCountIn(
+          { bars: countInBars, timeSignature: state.timeSignature, bpm: state.bpm, metronomeEnabled: state.metronomeOn },
+          playheadBeat,
+        );
+
+        // If count-in is needed, wait for it
+        if (countIn.countInBeats > 0) {
+          setCountingIn(true);
+          setCountInRemaining(countIn.countInBeats);
+
+          // Start playback for count-in
+          if (!state.isPlaying) {
+            engine.play();
+            state.togglePlay();
+          }
+
+          // Wait for count-in duration
+          const countInSeconds = (countIn.countInBeats / state.bpm) * 60;
+          await new Promise<void>((resolve) => {
+            let elapsed = 0;
+            const interval = setInterval(() => {
+              elapsed += 0.1;
+              const remaining = Math.max(0, countIn.countInBeats - (elapsed / 60 * state.bpm));
+              setCountInRemaining(Math.ceil(remaining));
+              if (elapsed >= countInSeconds) {
+                clearInterval(interval);
+                resolve();
+              }
+            }, 100);
+          });
+          setCountingIn(false);
+          setCountInRemaining(0);
+          if (!useDAWStore.getState().isRecording) return;
+        }
+
         const startBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
         midiRecordingTrackId.current = track.id;
         midiRecordingStartBeat.current = startBeat;
         midiCapture.current.start(startBeat);
+
+        const selectedDeviceId = localStorage.getItem('duckdaw_midi_device') || undefined;
         try {
           midiDisconnect.current = await connectMidiInputs(data => {
             const current = useDAWStore.getState();
             const beat = transportPositionToBeats(Tone.Transport.position.toString(), current.timeSignature);
             midiCapture.current.handleMessage(data, beat);
-          });
+            // Feed meter with velocity from noteOn messages
+            const status = data[0] & 0xf0;
+            if (status === 0x90 && data[2] > 0) {
+              midiMeter.current.feed(data[2]);
+            }
+          }, selectedDeviceId);
           if (!state.isPlaying) {
             engine.play();
             state.togglePlay();
@@ -302,12 +424,22 @@ export default function DAWApp() {
         const trackId = midiRecordingTrackId.current;
         midiRecordingTrackId.current = null;
         if (trackId && notes.length > 0) {
-          state.commitMidiRecording(
-            trackId,
-            midiRecordingStartBeat.current,
-            Math.max(1 / 4, endBeat - midiRecordingStartBeat.current),
-            notes,
+          // Check if we should overdub onto existing clip
+          const existingClip = state.clips.find(c =>
+            c.trackId === trackId && c.type === 'midi' &&
+            midiRecordingStartBeat.current >= c.start &&
+            midiRecordingStartBeat.current < c.start + c.duration
           );
+          if (existingClip) {
+            state.commitOverdubRecording(existingClip.id, notes);
+          } else {
+            state.commitMidiRecording(
+              trackId,
+              midiRecordingStartBeat.current,
+              Math.max(1 / 4, endBeat - midiRecordingStartBeat.current),
+              notes,
+            );
+          }
         }
       }
     };
@@ -315,7 +447,7 @@ export default function DAWApp() {
     return () => {
       midiDisconnect.current?.();
     };
-  }, [isRecording]);
+  }, [isRecording, countInBars]);
 
   useEffect(() => {
     const handleMicState = async () => {
@@ -328,13 +460,43 @@ export default function DAWApp() {
           state.toggleMicRecording();
           return;
         }
+          const countIn = computeCountIn({
+            bars: countInBars,
+            timeSignature: state.timeSignature,
+            bpm: state.bpm,
+            metronomeEnabled: true,
+          }, transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature));
+          if (countIn.countInBeats > 0) {
+            setCountingIn(true);
+            setCountInRemaining(countIn.countInBeats);
+            if (!state.isPlaying) {
+              engine.play();
+              state.togglePlay();
+            }
+            const countInSeconds = countIn.countInBeats * 60 / state.bpm;
+            await new Promise<void>(resolve => {
+              const startedAt = performance.now();
+              const interval = window.setInterval(() => {
+                const elapsedSeconds = (performance.now() - startedAt) / 1000;
+                setCountInRemaining(Math.max(0, Math.ceil(countIn.countInBeats - elapsedSeconds * state.bpm / 60)));
+                if (elapsedSeconds >= countInSeconds || !useDAWStore.getState().isMicRecording) {
+                  window.clearInterval(interval);
+                  resolve();
+                }
+              }, 100);
+            });
+            setCountingIn(false);
+            setCountInRemaining(0);
+            if (!useDAWStore.getState().isMicRecording) return;
+          }
         try {
           micRecordingTrackId.current = track.id;
           micRecordingStartBeat.current = transportPositionToBeats(
             Tone.Transport.position.toString(),
             state.timeSignature,
           );
-          await engine.micRecorder.start();
+          const selectedDeviceId = localStorage.getItem('duckdaw_audio_device') || undefined;
+          await engine.micRecorder.start(selectedDeviceId);
           if (!state.isPlaying) {
              engine.play();
              state.togglePlay();
@@ -355,7 +517,35 @@ export default function DAWApp() {
       }
     };
     void handleMicState();
-  }, [isMicRecording]);
+  }, [isMicRecording, countInBars]);
+
+  // Meter animation: poll the active MIDI/audio input at ~30fps.
+  useEffect(() => {
+    let running = true;
+    let audioPeak = -60;
+    const tick = () => {
+      if (!running) return;
+      if (isMicRecording) {
+        const rawLevel = engine.micRecorder.getInputLevelDb();
+        const level = Number.isFinite(rawLevel) ? Math.max(-60, rawLevel) : -60;
+        audioPeak = Math.max(audioPeak, level);
+        setMidiLevel(level);
+        setMidiPeak(audioPeak);
+        setMidiClipping(level >= -1);
+      } else {
+        const mState = midiMeter.current.read();
+        setMidiLevel(mState.level);
+        setMidiPeak(mState.peak);
+        setMidiClipping(mState.isClipping);
+      }
+      meterAnimRef.current = requestAnimationFrame(tick);
+    };
+    if (isRecording || isMicRecording) tick();
+    return () => {
+      running = false;
+      cancelAnimationFrame(meterAnimRef.current);
+    };
+  }, [isRecording, isMicRecording]);
 
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -383,13 +573,60 @@ export default function DAWApp() {
   return (
     <div className="flex flex-col h-screen bg-neutral-100 dark:bg-neutral-950 text-neutral-800 dark:text-neutral-200 overflow-hidden font-sans">
       <TopBar />
+      {/* Count-in indicator */}
+      {countingIn && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-xl animate-pulse" role="status" aria-live="assertive">
+          Count-in: {countInRemaining} beat{countInRemaining !== 1 ? 's' : ''} remaining
+        </div>
+      )}
+      {/* Count-in config bar */}
+      <div className="h-7 bg-neutral-50 dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 flex items-center px-4 gap-3 text-xs text-neutral-600 dark:text-neutral-400">
+        <label className="flex items-center gap-1">
+          Count-in:
+          <select
+            value={countInBars}
+            onChange={(e) => {
+              const v = Number(e.target.value) as CountInBars;
+              setCountInBars(v);
+              localStorage.setItem('duckdaw_countin_bars', String(v));
+            }}
+            className="bg-neutral-200 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded px-1 py-0.5 text-xs"
+            aria-label="Count-in bars before recording"
+          >
+            <option value={0}>Off</option>
+            <option value={1}>1 bar</option>
+            <option value={2}>2 bars</option>
+            <option value={4}>4 bars</option>
+          </select>
+        </label>
+        {/* Input meter */}
+        {(isRecording || isMicRecording) && (
+          <InputMeter
+            level={midiLevel}
+            peak={midiPeak}
+            isClipping={midiClipping}
+            type={isMicRecording ? 'audio' : 'midi'}
+            onClearClip={() => {
+              midiMeter.current.clear();
+              setMidiClipping(false);
+              setMidiPeak(isMicRecording ? -60 : 0);
+            }}
+          />
+        )}
+      </div>
       <div className="flex flex-col flex-1 overflow-hidden relative">
         <ArrangeView />
-        {bottomPanel === 'piano-roll' && <PianoRoll />}
-        {bottomPanel === 'mixer' && <Mixer />}
+        <Suspense fallback={null}>
+          {bottomPanel === 'piano-roll' && <PianoRoll />}
+          {bottomPanel === 'mixer' && <Mixer />}
+        </Suspense>
       </div>
-      <ExportModal />
-      <Toaster position="bottom-right" toastOptions={{ className: 'dark:bg-neutral-800 dark:text-neutral-100', style: { borderRadius: '8px', background: '#333', color: '#fff' } }} />
+      <Suspense fallback={null}>
+        {exportModalOpen && <ExportModal />}
+      </Suspense>
+      <DecisionHost />
+      {shortcutHelpOpen && <ShortcutHelp onClose={() => setShortcutHelpOpen(false)} />}
+      <Toaster position="bottom-right" toastOptions={{ ariaProps: { role: 'status', 'aria-live': 'polite' }, className: 'dark:bg-neutral-800 dark:text-neutral-100', style: { borderRadius: '8px', background: '#333', color: '#fff' } }} />
     </div>
   );
 }

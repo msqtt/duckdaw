@@ -4,11 +4,11 @@ import { dawStore } from './dawStore';
 const midiTrack = {
   id: 'midi-track', name: 'MIDI', type: 'midi' as const, volume: 0.8, pan: 0,
   isMuted: false, isSolo: false, instrument: 'synth' as const, color: '#00aaff',
-  reverb: 0, delay: 0,
+  reverb: 0, delay: 0, automationLanes: [],
 };
 const audioTrack = {
   id: 'audio-track', name: 'Audio', type: 'audio' as const, volume: 0.8, pan: 0,
-  isMuted: false, isSolo: false, color: '#ffaa00', reverb: 0, delay: 0,
+  isMuted: false, isSolo: false, color: '#ffaa00', reverb: 0, delay: 0, automationLanes: [],
 };
 
 describe('arrangement and editing invariants', () => {
