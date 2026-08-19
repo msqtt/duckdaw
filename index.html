@@ -22,6 +22,12 @@
       #initial-loader.light-mode .loader-bar-container {
         background: #e5e5e5;
       }
+      .loader-brand-accent {
+        color: #10b981;
+      }
+      #initial-loader.light-mode .loader-brand-accent {
+        color: #047857;
+      }
       .loader-bar {
         height: 100%; width: 0%; background: #10b981;
         animation: progress 2.5s ease-out forwards;
@@ -35,12 +41,15 @@
       .loader-text {
         margin-top: 12px; font-size: 14px; color: #a3a3a3; letter-spacing: 1px; text-transform: uppercase;
       }
+      #initial-loader.light-mode .loader-text {
+        color: #525252;
+      }
     </style>
   </head>
   <body>
     <div id="initial-loader">
       <div style="font-size: 48px;">🦆</div>
-      <div style="font-size: 24px; font-weight: bold; margin-top: 8px; letter-spacing: 2px;">Duck<span style="color: #10b981;">DAW</span></div>
+      <div style="font-size: 24px; font-weight: bold; margin-top: 8px; letter-spacing: 2px;">Duck<span class="loader-brand-accent">DAW</span></div>
       <div class="loader-bar-container"><div class="loader-bar"></div></div>
       <div class="loader-text">Loading Audio Engine...</div>
     </div>

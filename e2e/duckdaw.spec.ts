@@ -151,6 +151,18 @@ test('@smoke app metadata, SPA fallback, and serious accessibility gate', async 
   if (expectedContext) await expect(page.locator('html')).toHaveAttribute('data-duckdaw-context', expectedContext);
   if (expectedBranch) await expect(page.locator('html')).toHaveAttribute('data-duckdaw-branch', expectedBranch);
 
+  if (process.env.PLAYWRIGHT_BASE_URL) {
+    for (const path of ['/', '/e2e/spa-fallback']) {
+      const response = await page.request.get(path);
+      expect(response.ok(), `${path} should return a successful HTML response`).toBe(true);
+      const headers = response.headers();
+      expect(headers['cache-control'], `${path} must not be cached`).toContain('no-store');
+      expect(headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+      expect(headers['x-content-type-options']).toBe('nosniff');
+      expect(headers['x-frame-options']).toBe('DENY');
+    }
+  }
+
   const noticesResponse = await page.request.get('/THIRD_PARTY_NOTICES.txt');
   expect(noticesResponse.ok()).toBe(true);
   expect(await noticesResponse.text()).toContain('@ffmpeg/core 0.12.10');
