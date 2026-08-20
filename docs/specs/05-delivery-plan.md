@@ -1,6 +1,6 @@
 # DuckDAW 实现差距与交付计划
 
-> 本文记录 2026-08-17 当前工作树。状态变化以代码、测试、类型检查、构建和独立审查为依据。
+> 本文记录 2026-08-20 当前工作树。状态变化以代码、测试、类型检查、构建和独立审查为依据。
 
 ## 1. 能力状态矩阵
 
@@ -19,6 +19,7 @@
 | 钢琴卷帘/量化/MIDI 录音 | FR-MIDI-01~03 | 已实现 | `midiInput.test.ts`, `PianoRoll.tsx`, `DAWApp.tsx` |
 | 音频导入/录音 | FR-AUD-01/02 | 已实现 | `recorder.test.ts`, `ArrangeView.tsx` |
 | 混音/资源生命周期 | FR-MIX-01~03 | 已实现 | `mixSettings.test.ts`, `audioEngine.test.ts` |
+| 统一 Instrument/Effect Plugin SDK | PLUG-SDK-01/02, PLUG-INST-01, PLUG-FX-01, PLUG-FMT-01, PLUG-DEV-01 | 已实现并验证 | `pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `PLUG-E2E-01`；独立复审无 P0/P1 |
 | 离线导出 | FR-EXP-01 | 已实现 | `exportPlan.test.ts`, `ExportModal.tsx` |
 | 撤销/主题/反馈/快捷键 | FR-UI-01~04 | 已实现 | `editingInvariants.test.ts`, `complianceContracts.test.ts` |
 
@@ -71,6 +72,8 @@
 | T-MIDI-01 | Note On/Off、velocity 0、结束关闭 | FR-MIDI-03 | `midiInput.test.ts` |
 | T-MIC-01 | MIME、实际时长、输入关闭 | FR-AUD-02 | `recorder.test.ts` |
 | T-MIX-01 | 共享混音参数、节点 dispose | FR-MIX-02, FR-EXP-01 | `mixSettings.test.ts`, `audioEngine.test.ts` |
+| PLUG-T01~T09 | registry、参数、迁移、未知插件、共享 factory、dispose、Store/UI、内置插件 | Plugin SDK | 已通过：`pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `projectStorage.test.ts` |
+| PLUG-T10~T11 | 三浏览器/a11y 与全质量门禁 | Plugin SDK | 已通过：Playwright Chromium/Firefox/WebKit 21/21；unit、typecheck、build、size、diff、audit 均通过 |
 | T-EXPORT-01 | sample rate、full/selection、空工程 | FR-EXP-01 | `exportPlan.test.ts` |
 | T-UI-01 | Grid/Marker/GitHub/Theme/Toast/A11y 静态契约 | FR-TRN-03/06, FR-PROJ-08, FR-UI-02/03 | `complianceContracts.test.ts` |
 

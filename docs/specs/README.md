@@ -9,10 +9,11 @@
 | [01-product.md](./01-product.md) | 产品目标、用户、范围与成功标准 | 产品、设计、开发 |
 | [02-functional-requirements.md](./02-functional-requirements.md) | 带编号的功能需求和验收标准 | 产品、开发、测试 |
 | [03-technical-design.md](./03-technical-design.md) | 架构、状态模型、数据流与工程约束 | 开发、评审者 |
-| [04-project-format.md](./04-project-format.md) | `.duckdaw` v2.0.0 文件格式和 v1.x 兼容迁移规则 | 开发、集成方 |
+| [04-project-format.md](./04-project-format.md) | `.duckdaw` v2.1.0 文件格式及 v1.x/v2.0 兼容迁移规则 | 开发、集成方 |
 | [05-delivery-plan.md](./05-delivery-plan.md) | 实现差距、优先级、追踪矩阵与 Definition of Done | 维护者、测试 |
 | [06-compliance-audit.md](./06-compliance-audit.md) | 33 条需求代码审计与 SDD/TDD 实施基线 | 维护者、开发、测试 |
 | [07-next-generation-optimization.md](./07-next-generation-optimization.md) | 性能、交互、专业编辑、E2E 与 Cloudflare 双环境的执行规格 | 产品、开发、运维、测试 |
+| [08-plugin-sdk.md](./08-plugin-sdk.md) | 浏览器原生统一 Instrument/Effect Plugin SDK、生命周期、迁移与验收合同 | 插件开发者、开发、测试 |
 
 ## 2. 权威性
 
@@ -21,9 +22,10 @@
 1. `docs/specs/04-project-format.md` 对工程文件格式具有最高优先级；
 2. `docs/specs/02-functional-requirements.md` 对用户可见行为具有最高优先级；
 3. `docs/specs/03-technical-design.md` 约束实现方式和不变量；
-4. `docs/specs/07-next-generation-optimization.md` 对下一代增量需求、性能预算和发布拓扑具有最高优先级；
-5. `docs/specs/05-delivery-plan.md` 记录已交付基线，不改变目标需求；
-6. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
+4. `docs/specs/08-plugin-sdk.md` 对统一插件 API、生命周期、安全边界和插件持久化语义具有最高优先级；
+5. `docs/specs/07-next-generation-optimization.md` 对下一代增量需求、性能预算和发布拓扑具有最高优先级；
+6. `docs/specs/05-delivery-plan.md` 记录已交付基线，不改变目标需求；
+7. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
 
 若代码与规范不一致，不应静默修改规范以迎合缺陷；应在交付计划中记录差距，并决定修代码或显式变更需求。
 

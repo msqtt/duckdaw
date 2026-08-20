@@ -27,6 +27,14 @@ const fullProject: PersistedProjectState = {
     isMuted: false,
     isSolo: true,
     instrument: 'synth',
+    instrumentPlugin: {
+      id: 'instrument-track-a',
+      pluginId: 'duckdaw.instrument.synth',
+      pluginVersion: '1.0.0',
+      enabled: true,
+      parameters: { attack: 0.1, decay: 0.2, sustain: 0.4, release: 0.8 },
+    },
+    effectPlugins: [],
     color: '#123456',
     reverb: 0.3,
     delay: 0.2,
@@ -42,6 +50,7 @@ const fullProject: PersistedProjectState = {
     duration: 8,
     type: 'midi',
     notes: [{ id: 'note-a', note: 'C4', start: 0, duration: 1, velocity: 0 }],
+    audioEdit: undefined,
   }],
   markers: [{ id: 'marker-a', name: 'Intro', position: 0, color: '#654321' }],
   arrangements: [
@@ -50,7 +59,7 @@ const fullProject: PersistedProjectState = {
   ],
   activeArrangementId: 'alt',
   tempoTrack: [{ id: 'tempo-0', beat: 0, bpm: 96, curve: 'step' }],
-  buses: [{ id: 'master', name: 'Master', volume: 1, pan: 0, isMuted: false, effects: [], outputBusId: null }],
+  buses: [{ id: 'master', name: 'Master', volume: 1, pan: 0, isMuted: false, effects: [], effectPlugins: [], outputBusId: null }],
   sends: [],
 };
 

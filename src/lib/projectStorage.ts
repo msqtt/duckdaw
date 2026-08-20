@@ -14,6 +14,15 @@ import { createDefaultTempoMap, validateTempoMap, type TempoPoint } from './temp
 import { normalizeAutomationLane, type AutomationLane } from './automation';
 
 import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from './routingGraph';
+import {
+  legacyEffectToPluginDescriptor,
+  legacyInstrumentToPluginDescriptor,
+  normalizePluginChain,
+  normalizePluginDescriptor,
+  pluginEffectToLegacyType,
+  pluginInstrumentToLegacyType,
+  validatePluginDescriptor,
+} from './pluginSdk';
 // A basic structure, matching the spec
 
 export interface Manifest {
@@ -82,7 +91,7 @@ function assertSafeResourceName(name: unknown): asserts name is string {
   }
 }
 
-export const DUCKDAW_FORMAT_VERSION = '2.0.0';
+export const DUCKDAW_FORMAT_VERSION = '2.1.0';
 
 function extensionForAudioMime(mimeType: unknown): string {
   switch (typeof mimeType === 'string' ? mimeType.split(';')[0].toLowerCase() : '') {
@@ -128,6 +137,12 @@ function validateProjectData(project: any): void {
   }
 
   const trackIds = new Set<string>();
+  const pluginInstanceIds = new Set<string>();
+  const validatePluginInstance = (descriptor: unknown) => {
+    validatePluginDescriptor(descriptor);
+    if (pluginInstanceIds.has(descriptor.id)) throw new Error(`Duplicate plugin instance ID: ${descriptor.id}`);
+    pluginInstanceIds.add(descriptor.id);
+  };
   for (const track of project.tracks) {
     if (typeof track?.id !== 'string' || track.id.length === 0 || trackIds.has(track.id)
       || (track.type !== 'midi' && track.type !== 'audio')
@@ -136,6 +151,15 @@ function validateProjectData(project: any): void {
       throw new Error('Invalid or duplicate DuckDAW track');
     }
     trackIds.add(track.id);
+
+    if (track.instrumentPlugin != null) {
+      if (track.type === 'audio') throw new Error('Audio track cannot contain instrument plugin');
+      validatePluginInstance(track.instrumentPlugin);
+    }
+    if (track.effectPlugins != null) {
+      if (!Array.isArray(track.effectPlugins)) throw new Error('Invalid track effect plugin chain');
+      track.effectPlugins.forEach(validatePluginInstance);
+    }
 
     if (track.automationLanes != null) {
       if (!Array.isArray(track.automationLanes)) throw new Error('Invalid DuckDAW automation lanes');
@@ -190,6 +214,12 @@ function validateProjectData(project: any): void {
     ? project.buses as Bus[]
     : legacyRouting.buses;
   const routingSends = Array.isArray(project.sends) ? project.sends as Send[] : [];
+  for (const bus of routingBuses) {
+    if (bus.effectPlugins != null) {
+      if (!Array.isArray(bus.effectPlugins)) throw new Error('Invalid bus effect plugin chain');
+      bus.effectPlugins.forEach(validatePluginInstance);
+    }
+  }
   const routingRoot = routingBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
   try {
     validateRoutingGraph(
@@ -370,15 +400,44 @@ export async function createDuckDawPackage(
   };
 
   const fallbackRouting = createDefaultRouting(store.tracks);
-  const candidateBuses = Array.isArray(store.buses) && store.buses.length > 0
+  const candidateBuses = (Array.isArray(store.buses) && store.buses.length > 0
     ? store.buses
-    : fallbackRouting.buses;
+    : fallbackRouting.buses).map(bus => {
+      const effectPlugins = bus.effectPlugins == null
+        ? bus.effects.map(legacyEffectToPluginDescriptor)
+        : normalizePluginChain(bus.effectPlugins);
+      return {
+        ...bus,
+        effectPlugins,
+        effects: effectPlugins.flatMap(plugin => {
+          const type = pluginEffectToLegacyType(plugin.pluginId);
+          if (type == null) return [];
+          return [{
+            id: plugin.id,
+            type,
+            enabled: plugin.enabled,
+            parameters: Object.fromEntries(Object.entries(plugin.parameters)
+              .filter((entry): entry is [string, number] => typeof entry[1] === 'number')),
+          }];
+        }),
+      };
+    });
   const candidateSends = Array.isArray(store.sends) ? store.sends : [];
   const rootBusId = candidateBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
-  const tracksWithRouting = store.tracks.map(track => ({
-    ...track,
-    outputBusId: track.outputBusId ?? rootBusId,
-  }));
+  const tracksWithRouting = store.tracks.map(track => {
+    const instrumentPlugin = track.type === 'midi'
+      ? (track.instrumentPlugin == null
+        ? legacyInstrumentToPluginDescriptor(track.instrument, track.env, `instrument-${track.id}`)
+        : normalizePluginDescriptor(track.instrumentPlugin))
+      : undefined;
+    return {
+      ...track,
+      instrument: instrumentPlugin == null ? undefined : pluginInstrumentToLegacyType(instrumentPlugin.pluginId),
+      instrumentPlugin,
+      effectPlugins: normalizePluginChain(track.effectPlugins),
+      outputBusId: track.outputBusId ?? rootBusId,
+    };
+  });
   const routing = validateRoutingGraph(tracksWithRouting, candidateBuses, candidateSends);
 
   const arrangements = store.arrangements.length > 0
@@ -558,18 +617,34 @@ export async function loadDuckDawPackage(file: File | Blob): Promise<ProjectPack
   }
 
   const fallbackRouting = createDefaultRouting(Array.isArray(project.tracks) ? project.tracks : []);
-  const migratedBuses = Array.isArray(project.buses) && project.buses.length > 0
+  const migratedBuses = (Array.isArray(project.buses) && project.buses.length > 0
     ? project.buses as Bus[]
-    : fallbackRouting.buses;
+    : fallbackRouting.buses).map(bus => ({
+      ...bus,
+      effects: Array.isArray(bus.effects) ? bus.effects : [],
+      effectPlugins: bus.effectPlugins == null
+        ? (Array.isArray(bus.effects) ? bus.effects.map(legacyEffectToPluginDescriptor) : [])
+        : normalizePluginChain(bus.effectPlugins),
+    }));
   const migratedSends = Array.isArray(project.sends) ? project.sends as Send[] : [];
   const rootBusId = migratedBuses.find(bus => bus.outputBusId == null)?.id ?? 'master';
-  const migratedTracks = (Array.isArray(project.tracks) ? project.tracks : []).map((track: any) => ({
-    ...track,
-    automationLanes: Array.isArray(track.automationLanes)
-      ? track.automationLanes.map((lane: AutomationLane) => normalizeAutomationLane(lane))
-      : [],
-    outputBusId: track.outputBusId ?? rootBusId,
-  }));
+  const migratedTracks = (Array.isArray(project.tracks) ? project.tracks : []).map((track: any) => {
+    const instrumentPlugin = track.type === 'midi'
+      ? (track.instrumentPlugin == null
+        ? legacyInstrumentToPluginDescriptor(track.instrument, track.env, `instrument-${track.id}`)
+        : normalizePluginDescriptor(track.instrumentPlugin))
+      : undefined;
+    return {
+      ...track,
+      instrument: instrumentPlugin == null ? undefined : pluginInstrumentToLegacyType(instrumentPlugin.pluginId),
+      instrumentPlugin,
+      effectPlugins: normalizePluginChain(track.effectPlugins),
+      automationLanes: Array.isArray(track.automationLanes)
+        ? track.automationLanes.map((lane: AutomationLane) => normalizeAutomationLane(lane))
+        : [],
+      outputBusId: track.outputBusId ?? rootBusId,
+    };
+  });
   const migratedRouting = validateRoutingGraph(migratedTracks, migratedBuses, migratedSends);
 
   const compatibleProject: PersistedProjectState = {

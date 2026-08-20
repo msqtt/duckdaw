@@ -14,6 +14,13 @@ import ffmpegWasmURL from '@ffmpeg/core/wasm?url';
 import { buildMixGraphPlan } from '../../lib/mixGraph';
 import { computeClipPlaybackPlan, createFadeValueCurve } from '../../lib/audioEditing';
 import { audioBufferToChannelData, audioDataToWav, processMasterAudio, sanitizeStemFileName, triggerBlobDownload } from '../../lib/audioExport';
+import {
+  legacyEffectToPluginDescriptor,
+  legacyInstrumentToPluginDescriptor,
+  type EffectPluginInstance,
+  type InstrumentPluginInstance,
+} from '../../lib/pluginSdk';
+import { instantiateEffectChain, instantiateInstrumentPlugin } from '../../lib/pluginRuntime';
 import { generateAutomationSchedule } from '../../lib/automation';
 import { beatsToSecondsWithTempoMap } from '../../lib/tempoMap';
 
@@ -97,12 +104,14 @@ export function ExportModal() {
 
         const renderOne = async (sourceTrackId?: string) => {
           const sourceClips = sourceTrackId == null ? renderClips : renderClips.filter(clip => clip.trackId === sourceTrackId);
-          return Tone.Offline(async () => {
+          const ownedPluginInstances: Array<InstrumentPluginInstance | EffectPluginInstance> = [];
+          try {
+            return await Tone.Offline(async () => {
              Tone.Transport.bpm.value = bpm;
              Tone.Destination.volume.value = masterVolume === 0 ? -Infinity : 20 * Math.log10(masterVolume);
              Tone.getContext().lookAhead = 0;
 
-             const synths = new Map();
+             const synths = new Map<string, InstrumentPluginInstance>();
              const trackInputs = new Map<string, Tone.Gain>();
              const trackOutputs = new Map<string, Tone.Gain>();
              const trackChannels = new Map<string, Tone.Channel>();
@@ -129,7 +138,16 @@ export function ExportModal() {
                  reverb.wet.value = mix.reverbWet;
                  delay.wet.value = mix.delayWet;
                  input.connect(channel);
-                 channel.chain(delay, reverb, output);
+                 let trackTail: Tone.ToneAudioNode = channel;
+                 const trackEffects = instantiateEffectChain(track.effectPlugins ?? []).map(plugin => plugin.instance);
+                 ownedPluginInstances.push(...trackEffects);
+                 for (const effect of trackEffects) {
+                   trackTail.connect(effect.node);
+                   trackTail = effect.node;
+                 }
+                 trackTail.connect(delay);
+                 delay.connect(reverb);
+                 reverb.connect(output);
 
                  trackInputs.set(track.id, input);
                  trackOutputs.set(track.id, output);
@@ -138,24 +156,14 @@ export function ExportModal() {
                  trackDelays.set(track.id, delay);
 
                  if (track.type === 'midi') {
-                     let synth;
-                     switch(track.instrument) {
-                        case 'piano':
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: track.env || { attack: 0.02, decay: 1, sustain: 0.4, release: 1 } });
-                            break;
-                        case 'bass':
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: track.env || { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 } });
-                            break;
-                        case 'drum':
-                            synth = new Tone.PolySynth(Tone.MembraneSynth);
-                            break;
-                        case 'synth':
-                        default:
-                            synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'square' }, envelope: track.env || { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } });
-                            break;
+                     const descriptor = track.instrumentPlugin
+                       ?? legacyInstrumentToPluginDescriptor(track.instrument, track.env, `instrument-${track.id}`);
+                     const instrument = instantiateInstrumentPlugin(descriptor);
+                     if (instrument != null) {
+                       instrument.instance.node.connect(input);
+                       synths.set(track.id, instrument.instance);
+                       ownedPluginInstances.push(instrument.instance);
                      }
-                     synth.connect(input);
-                     synths.set(track.id, synth);
                  }
              }
 
@@ -168,14 +176,12 @@ export function ExportModal() {
                  channel.mute = bus.isMuted;
                  input.connect(channel);
                  let tail: Tone.ToneAudioNode = channel;
-                 for (const effect of bus.effects) {
-                     if (!effect.enabled) continue;
-                     let node: Tone.ToneAudioNode;
-                     if (effect.type === 'reverb') node = new Tone.Reverb(effect.parameters.decay ?? 2);
-                     else if (effect.type === 'delay') node = new Tone.FeedbackDelay(effect.parameters.delayTime ?? 0.25, effect.parameters.feedback ?? 0.3);
-                     else node = new Tone.Limiter(effect.parameters.threshold ?? -1);
-                     tail.connect(node);
-                     tail = node;
+                 const descriptors = bus.effectPlugins ?? bus.effects.map(legacyEffectToPluginDescriptor);
+                 const busEffects = instantiateEffectChain(descriptors).map(plugin => plugin.instance);
+                 ownedPluginInstances.push(...busEffects);
+                 for (const effect of busEffects) {
+                     tail.connect(effect.node);
+                     tail = effect.node;
                  }
                  tail.connect(output);
                  busInputs.set(bus.id, input);
@@ -298,7 +304,10 @@ export function ExportModal() {
              }
              
              Tone.Transport.start(0);
-        }, plan.durationSeconds, 2, plan.sampleRate);
+            }, plan.durationSeconds, 2, plan.sampleRate);
+          } finally {
+            ownedPluginInstances.forEach(instance => instance.dispose());
+          }
         };
 
         clearInterval(interval);

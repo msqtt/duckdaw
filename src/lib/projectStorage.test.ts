@@ -68,7 +68,7 @@ describe('Project Storage (DuckDAW format)', () => {
     
     const manifest = JSON.parse(manifestStr!);
     expect(manifest.format).toBe('duckdaw');
-    expect(manifest.version).toBe('2.0.0');
+    expect(manifest.version).toBe('2.1.0');
     expect(manifest.name).toBe('Test Project');
     expect(manifest.description).toBe('A test project');
 
@@ -76,7 +76,7 @@ describe('Project Storage (DuckDAW format)', () => {
     expect(projectStr).toBeDefined();
     
     const projectData = JSON.parse(projectStr!);
-    expect(projectData.meta.version).toBe('2.0.0');
+    expect(projectData.meta.version).toBe('2.1.0');
     expect(projectData.transport.bpm).toBe(125);
     expect(projectData.tracks.length).toBe(2);
     expect(projectData.tracks[0].name).toBe('Bass');

@@ -7,6 +7,15 @@ import { type TempoPoint, validateTempoMap, createDefaultTempoMap } from '../lib
 import { type AutomationPoint, type AutomationLane, type AutomationTarget, type AutomationCurve, normalizeAutomationLane } from '../lib/automation';
 import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from '../lib/routingGraph';
 
+import {
+  legacyEffectToPluginDescriptor,
+  legacyInstrumentToPluginDescriptor,
+  normalizePluginChain,
+  normalizePluginDescriptor,
+  pluginEffectToLegacyType,
+  pluginInstrumentToLegacyType,
+  type PluginInstanceDescriptor,
+} from '../lib/pluginSdk';
 export type TrackType = 'midi' | 'audio';
 export type InstrumentType = 'piano' | 'synth' | 'bass' | 'drum';
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -76,12 +85,14 @@ export interface Track {
   pan: number; // -1 to 1
   isMuted: boolean;
   isSolo: boolean;
-  instrument?: InstrumentType; // for midi
+  instrument?: InstrumentType; // 2.0 compatibility mirror for midi
+  instrumentPlugin?: PluginInstanceDescriptor; // canonical 2.1 instrument
   color: string;
-  // new FX and synth props
+  // legacy quick FX and synth props
   reverb: number; // 0-1 send
   delay: number; // 0-1 send
   env?: EnvConfig;
+  effectPlugins?: PluginInstanceDescriptor[];
   automationLanes: AutomationLane[];
   outputBusId?: string; // required when persisted as v2; legacy inputs migrate to Master
 }
@@ -303,6 +314,8 @@ export const dawStore = createStore<DAWState>()(
           isMuted: false,
           isSolo: false,
           instrument: 'synth',
+          instrumentPlugin: legacyInstrumentToPluginDescriptor('synth', { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 }, 'instrument-track-1'),
+          effectPlugins: [],
           color: '#0ea5e9', // sky-500
           reverb: 0.2,
           delay: 0,
@@ -319,6 +332,8 @@ export const dawStore = createStore<DAWState>()(
           isMuted: false,
           isSolo: false,
           instrument: 'bass',
+          instrumentPlugin: legacyInstrumentToPluginDescriptor('bass', { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 }, 'instrument-track-2'),
+          effectPlugins: [],
           color: '#ef4444', // red-500
           reverb: 0,
           delay: 0,
@@ -335,6 +350,8 @@ export const dawStore = createStore<DAWState>()(
           isMuted: false,
           isSolo: false,
           instrument: 'drum',
+          instrumentPlugin: legacyInstrumentToPluginDescriptor('drum', undefined, 'instrument-track-3'),
+          effectPlugins: [],
           color: '#f59e0b', // amber-500
           reverb: 0.1,
           delay: 0,
@@ -471,18 +488,37 @@ export const dawStore = createStore<DAWState>()(
         try {
           const sourceTracks = data.tracks ?? [];
           const defaultRouting = createDefaultRouting(sourceTracks);
-          buses = Array.isArray(data.buses) && data.buses.length > 0
+          buses = (Array.isArray(data.buses) && data.buses.length > 0
             ? data.buses
-            : defaultRouting.buses;
+            : defaultRouting.buses).map(bus => ({
+              ...bus,
+              effects: Array.isArray(bus.effects) ? bus.effects : [],
+              effectPlugins: bus.effectPlugins == null
+                ? (Array.isArray(bus.effects) ? bus.effects.map(legacyEffectToPluginDescriptor) : [])
+                : normalizePluginChain(bus.effectPlugins),
+            }));
           sends = Array.isArray(data.sends) ? data.sends : [];
           const defaultOutputBusId = buses.find(bus => bus.outputBusId == null)?.id ?? 'master';
-          tracks = sourceTracks.map(track => ({
-            ...track,
-            automationLanes: Array.isArray(track.automationLanes)
-              ? track.automationLanes.map(lane => normalizeAutomationLane(lane))
-              : [],
-            outputBusId: track.outputBusId ?? defaultOutputBusId,
-          }));
+          tracks = sourceTracks.map(track => {
+            if (track.type === 'audio' && track.instrumentPlugin != null) {
+              throw new Error('Audio track cannot contain instrument plugin');
+            }
+            const instrumentPlugin = track.type === 'midi'
+              ? (track.instrumentPlugin == null
+                ? legacyInstrumentToPluginDescriptor(track.instrument, track.env, `instrument-${track.id}`)
+                : normalizePluginDescriptor(track.instrumentPlugin))
+              : undefined;
+            return {
+              ...track,
+              instrument: instrumentPlugin == null ? undefined : pluginInstrumentToLegacyType(instrumentPlugin.pluginId),
+              instrumentPlugin,
+              effectPlugins: normalizePluginChain(track.effectPlugins),
+              automationLanes: Array.isArray(track.automationLanes)
+                ? track.automationLanes.map(lane => normalizeAutomationLane(lane))
+                : [],
+              outputBusId: track.outputBusId ?? defaultOutputBusId,
+            };
+          });
           const routing = validateRoutingGraph(tracks, buses, sends);
           buses = routing.buses;
           sends = routing.sends;
@@ -547,21 +583,46 @@ export const dawStore = createStore<DAWState>()(
           metronomeSound: state.metronomeSound,
           metronomeSubdivisions: state.metronomeSubdivisions,
           masterVolume: state.masterVolume,
-          tracks: state.tracks,
+          tracks: state.tracks.map(track => ({
+            ...track,
+            instrument: track.instrumentPlugin == null
+              ? track.instrument
+              : pluginInstrumentToLegacyType(track.instrumentPlugin.pluginId),
+            instrumentPlugin: track.instrumentPlugin == null
+              ? undefined
+              : normalizePluginDescriptor(track.instrumentPlugin),
+            effectPlugins: normalizePluginChain(track.effectPlugins),
+          })),
           clips: state.clips,
           markers: state.markers,
           arrangements: state.arrangements,
           activeArrangementId: state.activeArrangementId,
           tempoTrack: state.tempoTrack,
-          buses: state.buses,
+          buses: state.buses.map(bus => ({
+            ...bus,
+            effectPlugins: normalizePluginChain(bus.effectPlugins),
+            effects: normalizePluginChain(bus.effectPlugins).flatMap(plugin => {
+              const type = pluginEffectToLegacyType(plugin.pluginId);
+              if (type == null) return [];
+              return [{
+                id: plugin.id,
+                type,
+                enabled: plugin.enabled,
+                parameters: Object.fromEntries(Object.entries(plugin.parameters)
+                  .filter((entry): entry is [string, number] => typeof entry[1] === 'number')),
+              }];
+            }),
+          })),
           sends: state.sends,
         };
       },
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
       stop: () => set({ isPlaying: false, isRecording: false, isMicRecording: false }),
       addTrack: (type) => set((state) => {
+        const id = generateId();
+        const env = type === 'midi' ? { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } : undefined;
         const newTrack: Track = {
-          id: generateId(),
+          id,
           name: `${type === 'midi' ? 'Inst' : 'Audio'} ${state.tracks.length + 1}`,
           type,
           volume: 0.8,
@@ -569,10 +630,14 @@ export const dawStore = createStore<DAWState>()(
           isMuted: false,
           isSolo: false,
           instrument: type === 'midi' ? 'synth' : undefined,
+          instrumentPlugin: type === 'midi'
+            ? legacyInstrumentToPluginDescriptor('synth', env, `instrument-${id}`)
+            : undefined,
+          effectPlugins: [],
           color: getRandomColor(),
           reverb: 0,
           delay: 0,
-          env: type === 'midi' ? { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } : undefined,
+          env,
           automationLanes: [],
           outputBusId: state.buses.find(bus => bus.outputBusId == null)?.id ?? 'master'
         };
@@ -1065,6 +1130,7 @@ export const dawStore = createStore<DAWState>()(
           pan: 0,
           isMuted: false,
           effects: [],
+          effectPlugins: [],
           outputBusId: rootBusId,
         }];
         try {

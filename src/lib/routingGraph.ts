@@ -1,3 +1,5 @@
+import type { PluginInstanceDescriptor } from './pluginSdk';
+
 export type EffectType = 'reverb' | 'delay' | 'limiter';
 
 export interface EffectDescriptor {
@@ -14,6 +16,7 @@ export interface Bus {
   pan: number;
   isMuted: boolean;
   effects: EffectDescriptor[];
+  effectPlugins?: PluginInstanceDescriptor[];
   outputBusId: string | null;
 }
 
@@ -68,6 +71,7 @@ export function validateRoutingGraph(
   const buses = inputBuses.map(bus => ({
     ...bus,
     effects: bus.effects.map(effect => ({ ...effect, parameters: { ...effect.parameters } })),
+    effectPlugins: bus.effectPlugins?.map(plugin => ({ ...plugin, parameters: { ...plugin.parameters } })),
   }));
   const sends = inputSends.map(send => ({ ...send }));
   if (buses.length === 0 || buses.filter(bus => bus.outputBusId == null).length !== 1) {
@@ -147,6 +151,7 @@ export function createDefaultRouting(tracks: readonly { id: string }[]): {
     pan: 0,
     isMuted: false,
     effects: [],
+    effectPlugins: [],
     outputBusId: null,
   }];
   return {

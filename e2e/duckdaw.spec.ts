@@ -129,9 +129,36 @@ test('E2E-02 dirty edits create a restorable recovery snapshot', async ({ page }
   await expect(page.getByTestId('track-header')).toHaveCount(1);
 });
 
+test('PLUG-E2E-01 selects an instrument and edits a track effect as undoable plugin transactions', async ({ page }) => {
+  await openApp(page);
+  await newProject(page);
+  await addTrack(page, 'midi');
+  await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  await expect(page.getByText('MIXER', { exact: true })).toBeVisible();
+
+  const instrument = page.getByLabel('Instrument for Inst 1');
+  await instrument.selectOption('duckdaw.instrument.pluck');
+  await expect(instrument).toHaveValue('duckdaw.instrument.pluck');
+
+  const addEffect = page.getByLabel('Add effect to Inst 1');
+  await addEffect.selectOption('duckdaw.effect.distortion');
+  const enabledEffect = page.getByRole('button', {
+    name: 'Disable duckdaw.effect.distortion on Inst 1',
+  });
+  await expect(enabledEffect).toBeVisible();
+  await page.getByLabel('Drive for duckdaw.effect.distortion').fill('0.8');
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByLabel('Drive for duckdaw.effect.distortion')).not.toHaveValue('0.8');
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(page.getByLabel('Drive for duckdaw.effect.distortion')).toHaveValue('0.8');
+});
+
 test('E2E-03 unsupported FSA, Web MIDI, and microphone APIs use visible fallbacks', async ({ page }) => {
   await openApp(page);
   await openSettings(page);
+
+
   await expect(page.getByText('Web MIDI API not supported by this browser')).toBeVisible();
   await expect(page.getByText('getUserMedia not supported')).toBeVisible();
   const downloadPromise = page.waitForEvent('download');

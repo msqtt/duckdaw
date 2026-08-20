@@ -24,6 +24,7 @@ export default defineConfig(() => {
             if (id.includes('/node_modules/@ffmpeg/')) return 'vendor-ffmpeg';
             if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) return 'vendor-react';
             if (/\/src\/lib\/(automation|tempoMap|routingGraph|mixGraph)\.ts$/.test(id)) return 'daw-domain';
+            if (/\/src\/lib\/(pluginSdk|pluginRuntime|builtinPlugins)\.ts$/.test(id)) return 'duckdaw-plugins';
           },
         },
       },

@@ -9,6 +9,7 @@ const budgets = [
   { pattern: /^vendor-react-.*\.js$/, maxBytes: 220 * 1024 },
   { pattern: /^ExportModal-.*\.js$/, maxBytes: 40 * 1024 },
   { pattern: /^daw-domain-.*\.js$/, maxBytes: 40 * 1024 },
+  { pattern: /^duckdaw-plugins-.*\.js$/, maxBytes: 40 * 1024 },
 ];
 
 const errors = [];

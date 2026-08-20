@@ -2,7 +2,7 @@
 
 ## 1. 格式标识
 
-- 当前格式版本：`2.0.0`；
+- 当前格式版本：`2.1.0`；
 - 扩展名：`.duckdaw`；
 - 容器：ZIP；
 - JSON 编码：UTF-8；
@@ -22,16 +22,16 @@ project.duckdaw
     └── <resource-id>.json
 ```
 
-v2.0.0 不允许工程主体依赖包外绝对路径、`file:` URL、HTTP URL 或旧会话 `blob:` URL。
+v2.1.0 不允许工程主体或插件 descriptor 依赖包外绝对路径、`file:` URL、HTTP URL、旧会话 `blob:` URL 或可执行远程代码。
 
 ## 3. `manifest.json`
 
 ### 3.1 Schema
 
 ```ts
-interface ManifestV2 {
+interface ManifestV2_1 {
   format: 'duckdaw';
-  version: '2.0.0';
+  version: '2.1.0';
   generator: string;
   createdAt: string;       // ISO 8601
   updatedAt: string;       // ISO 8601
@@ -64,9 +64,9 @@ interface ManifestV2 {
 ### 4.1 顶层 Schema
 
 ```ts
-interface ProjectV2 {
+interface ProjectV2_1 {
   meta: {
-    version: '2.0.0';
+    version: '2.1.0';
     projectId: string;
   };
   transport: TransportV1_1;
@@ -110,6 +110,15 @@ interface TransportV1_1 {
 ```ts
 type TrackType = 'midi' | 'audio';
 type InstrumentType = 'piano' | 'synth' | 'bass' | 'drum';
+type PluginParameterValue = number | string;
+
+interface PluginInstanceDescriptorV2_1 {
+  id: string;                          // 工程内稳定且唯一
+  pluginId: string;                    // 符合 Plugin SDK ID 规则
+  pluginVersion: string;               // SemVer
+  enabled: boolean;
+  parameters: Record<string, PluginParameterValue>;
+}
 
 interface TrackV2 {
   id: string;
@@ -120,22 +129,24 @@ interface TrackV2 {
   isMuted: boolean;
   isSolo: boolean;
   color: string;                       // CSS color；推荐 #RRGGBB
-  instrument?: InstrumentType;         // midi only
-  reverb: number;                      // 0..1
-  delay: number;                       // 0..1
+  instrument?: InstrumentType;         // 2.0 compatibility mirror；midi only
+  instrumentPlugin?: PluginInstanceDescriptorV2_1; // 2.1 canonical instrument
+  reverb: number;                      // 0..1 legacy quick effect/automation
+  delay: number;                       // 0..1 legacy quick effect/automation
   env?: {
     attack: number;
     decay: number;
     sustain: number;                   // 0..1
     release: number;
   };
-  insertEffects: unknown[];            // legacy track effects；v2 Bus effects 见下文
+  insertEffects: unknown[];            // pre-2.1 legacy placeholder
+  effectPlugins?: PluginInstanceDescriptorV2_1[]; // ordered 2.1 Track insert chain
   automationLanes: AutomationLaneV1_2[];
   outputBusId: string;                 // 必须引用 buses[]
 }
 ```
 
-Audio Track 不得包含有行为意义的 `instrument/env`。未知 instrument 在迁移时降级为 `synth` 并产生警告。
+Audio Track 不得包含有行为意义的 `instrument/env/instrumentPlugin`。2.1 loader 优先使用结构有效的 `instrumentPlugin`；缺失时把 legacy instrument 映射为 `duckdaw.instrument.synth|keys|bass|drums` 并复制 envelope 参数。未知但结构有效的 plugin descriptor 必须保留：Instrument 运行时回退内置 synth，Effect 运行时 bypass；未知值不得在保存时丢失。`effectPlugins` 按数组顺序串联，实例 ID 在同一工程内唯一。完整 registry、参数和失败语义见 `08-plugin-sdk.md`。
 
 ### 4.4 Clip 与 Note
 
@@ -235,13 +246,14 @@ interface EffectDescriptorV2 {
   parameters: Record<string, number>;
 }
 
-interface BusV2 {
+interface BusV2_1 {
   id: string;
   name: string;
   volume: number;                       // 0..1
   pan: number;                          // -1..1
   isMuted: boolean;
-  effects: EffectDescriptorV2[];
+  effects: EffectDescriptorV2[];        // 2.0 compatibility mirror
+  effectPlugins?: PluginInstanceDescriptorV2_1[]; // ordered 2.1 canonical chain
   outputBusId: string | null;           // 唯一 null Bus 连接 destination
 }
 
@@ -257,7 +269,7 @@ interface SendV2 {
 
 Tempo、Bus output 和 Bus-origin Send 共同参与 DAG 校验；拒绝环、悬空引用、重复 ID、多个 destination-root Bus 和二义性 Send source。Track automation 的 volume/reverb/delay/masterVolume 值域为 `0..1`，pan 为 `-1..1`；指数段两端必须严格大于 0。
 
-v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 Track 的 `outputBusId = 'master'` 和空 Sends；迁移或校验失败时不得替换当前工程。
+v1.x→v2.0 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 Track 的 `outputBusId = 'master'` 和空 Sends。v2.0→v2.1 再把 legacy instrument/env 与 Bus effects 映射为 Plugin SDK descriptor，并为 Track effectPlugins 生成空数组。2.1 写出器保留 legacy 镜像；未知结构有效插件原样往返。任一迁移或校验失败时不得替换当前工程。
 
 ## 5. 最小示例
 
@@ -266,7 +278,7 @@ v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 T
 ```json
 {
   "format": "duckdaw",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "generator": "duckdaw",
   "createdAt": "2026-08-17T00:00:00.000Z",
   "updatedAt": "2026-08-17T00:00:00.000Z",
@@ -283,7 +295,7 @@ v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 T
 ```json
 {
   "meta": {
-    "version": "2.0.0",
+    "version": "2.1.0",
     "projectId": "8cf860e5-b5cc-4b8c-aa08-1f0d28fb52b4"
   },
   "transport": {
@@ -359,6 +371,9 @@ v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 T
 | tempoTrack | beat 0、当前 BPM 的 step 点 |
 | buses | 唯一 `master` Bus，output 为 `null` |
 | Track.outputBusId | `master` |
+| Track.instrumentPlugin | 从 legacy instrument/env 迁移；新 MIDI Track 为 `duckdaw.instrument.synth` |
+| Track.effectPlugins | `[]` |
+| Bus.effectPlugins | 从 legacy Bus.effects 迁移，否则 `[]` |
 | sends | `[]` |
 
 ### Legacy JSON
@@ -390,6 +405,7 @@ v1.x→v2 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 T
 - 非 4/4 拍号；
 - markers 和多个 arrangements；
 - MIDI notes 与颜色/ADSR/效果；
+- 已知和未知 Instrument/Effect plugin descriptors、顺序、enabled 与参数；
 - 至少两个不同编码的 Audio Clip；
 - loop/metronome/master 设置；
 - legacy JSON；

@@ -2,8 +2,123 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useDAWStore, Track } from '../../store/dawStore';
 import { Volume2, VolumeX } from 'lucide-react';
 import { engine } from '../../lib/audioEngine';
-
 import { useShallow } from 'zustand/react/shallow';
+import {
+  createPluginDescriptor,
+  pluginInstrumentToLegacyType,
+  type PluginInstanceDescriptor,
+  type PluginParameterDefinition,
+} from '../../lib/pluginSdk';
+import { getDefaultPluginRegistry } from '../../lib/pluginRuntime';
+
+const pluginRegistry = getDefaultPluginRegistry();
+const instrumentDefinitions = pluginRegistry.list('instrument');
+const effectDefinitions = pluginRegistry.list('effect');
+
+function PluginParameterControl({
+  plugin,
+  parameter,
+  onChange,
+}: {
+  plugin: PluginInstanceDescriptor;
+  parameter: PluginParameterDefinition;
+  onChange: (value: number | string) => void;
+  key?: React.Key;
+}) {
+  const value = plugin.parameters[parameter.id] ?? parameter.defaultValue;
+  if (parameter.type === 'enum') {
+    return (
+      <label className="flex items-center justify-between gap-1 text-[8px]">
+        <span>{parameter.name}</span>
+        <select
+          aria-label={`${parameter.name} for ${plugin.pluginId}`}
+          value={String(value)}
+          onChange={event => onChange(event.target.value)}
+          className="h-4 max-w-16 rounded bg-white dark:bg-neutral-800"
+        >
+          {parameter.values.map(option => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </label>
+    );
+  }
+  return (
+    <label className="flex items-center justify-between gap-1 text-[8px]">
+      <span className="truncate" title={parameter.name}>{parameter.name}</span>
+      <input
+        type="range"
+        min={parameter.min}
+        max={parameter.max}
+        step={parameter.step}
+        value={typeof value === 'number' ? value : parameter.defaultValue}
+        aria-label={`${parameter.name} for ${plugin.pluginId}`}
+        onChange={event => onChange(Number(event.target.value))}
+        className="w-12"
+      />
+    </label>
+  );
+}
+
+function PluginChainEditor({
+  ownerId,
+  ownerName,
+  plugins,
+  onChange,
+}: {
+  ownerId: string;
+  ownerName: string;
+  plugins: PluginInstanceDescriptor[];
+  onChange: (plugins: PluginInstanceDescriptor[]) => void;
+}) {
+  return (
+    <div className="w-full space-y-1 rounded bg-black/5 dark:bg-black/20 p-1">
+      <label className="sr-only" htmlFor={`add-effect-${ownerId}`}>Add effect to {ownerName}</label>
+      <select
+        id={`add-effect-${ownerId}`}
+        value=""
+        onChange={event => {
+          const definition = pluginRegistry.get(event.target.value);
+          if (definition?.kind === 'effect') onChange([...plugins, createPluginDescriptor(definition)]);
+        }}
+        className="h-5 w-full rounded bg-white dark:bg-neutral-800 text-[9px]"
+      >
+        <option value="">+ Effect</option>
+        {effectDefinitions.map(definition => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
+      </select>
+      {plugins.map(plugin => {
+        const definition = pluginRegistry.get(plugin.pluginId);
+        const available = definition?.kind === 'effect';
+        return (
+          <div key={plugin.id} className="rounded border border-neutral-300 dark:border-neutral-700 p-1">
+            <div className="flex items-center justify-between gap-1 text-[8px]">
+              <button
+                type="button"
+                aria-pressed={plugin.enabled}
+                aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.pluginId} on ${ownerName}`}
+                onClick={() => onChange(plugins.map(item => item.id === plugin.id ? { ...item, enabled: !item.enabled } : item))}
+                className={plugin.enabled ? 'text-emerald-600' : 'text-neutral-500'}
+              >{available ? definition.name : `Unavailable: ${plugin.pluginId}`}</button>
+              <button
+                type="button"
+                aria-label={`Remove ${plugin.pluginId} from ${ownerName}`}
+                onClick={() => onChange(plugins.filter(item => item.id !== plugin.id))}
+              >×</button>
+            </div>
+            {available && definition.parameters.map(parameter => (
+              <PluginParameterControl
+                key={parameter.id}
+                plugin={plugin}
+                parameter={parameter}
+                onChange={value => onChange(plugins.map(item => item.id === plugin.id
+                  ? { ...item, parameters: { ...item.parameters, [parameter.id]: value } }
+                  : item))}
+              />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   const updateTrack = useDAWStore(state => state.updateTrack);
@@ -33,6 +148,56 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
         {track.name}
       </div>
       
+      {track.type === 'midi' && (
+        <div className="w-full space-y-1 px-2 mb-2">
+          <label className="sr-only" htmlFor={`instrument-${track.id}`}>Instrument for {track.name}</label>
+          <select
+            id={`instrument-${track.id}`}
+            value={track.instrumentPlugin?.pluginId ?? ''}
+            onChange={event => {
+              const definition = pluginRegistry.get(event.target.value);
+              if (definition?.kind !== 'instrument') return;
+              const descriptor = createPluginDescriptor(definition, track.instrumentPlugin?.id);
+              updateTrack(track.id, {
+                instrumentPlugin: descriptor,
+                instrument: pluginInstrumentToLegacyType(descriptor.pluginId),
+              });
+            }}
+            className="h-5 w-full rounded bg-white dark:bg-neutral-800 text-[9px]"
+          >
+            {track.instrumentPlugin != null && pluginRegistry.get(track.instrumentPlugin.pluginId)?.kind !== 'instrument' && (
+              <option value={track.instrumentPlugin.pluginId}>Unavailable: {track.instrumentPlugin.pluginId}</option>
+            )}
+            <option value="" disabled>Select instrument</option>
+            {instrumentDefinitions.map(definition => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
+          </select>
+          {track.instrumentPlugin != null && (() => {
+            const definition = pluginRegistry.get(track.instrumentPlugin.pluginId);
+            if (definition?.kind !== 'instrument') return null;
+            return definition.parameters.map(parameter => (
+              <PluginParameterControl
+                key={parameter.id}
+                plugin={track.instrumentPlugin!}
+                parameter={parameter}
+                onChange={value => updateTrack(track.id, {
+                  instrumentPlugin: {
+                    ...track.instrumentPlugin!,
+                    parameters: { ...track.instrumentPlugin!.parameters, [parameter.id]: value },
+                  },
+                })}
+              />
+            ));
+          })()}
+        </div>
+      )}
+      <div className="w-full px-2 mb-2">
+        <PluginChainEditor
+          ownerId={`track-${track.id}`}
+          ownerName={track.name}
+          plugins={track.effectPlugins ?? []}
+          onChange={effectPlugins => updateTrack(track.id, { effectPlugins })}
+        />
+      </div>
       <div className="flex gap-1 mb-4">
         <button 
           aria-label={`Mute ${track.name}`}
@@ -270,32 +435,12 @@ function RoutingControls() {
               <input type="range" min="0" max="1" step="0.01" value={bus.volume} aria-label={`Bus volume ${bus.name}`} onChange={event => updateBus(bus.id, { volume: Number(event.target.value) })} className="w-12" />
               <input type="range" min="-1" max="1" step="0.01" value={bus.pan} aria-label={`Bus pan ${bus.name}`} onChange={event => updateBus(bus.id, { pan: Number(event.target.value) })} className="w-12" />
               <button type="button" aria-label={`Mute ${bus.name}`} aria-pressed={bus.isMuted} onClick={() => updateBus(bus.id, { isMuted: !bus.isMuted })} className={bus.isMuted ? 'text-orange-500' : ''}>M</button>
-              {(['reverb', 'delay', 'limiter'] as const).map(type => (
-                <button
-                  key={type}
-                  type="button"
-                  aria-label={`Add ${type} to ${bus.name}`}
-                  onClick={() => updateBus(bus.id, { effects: [...bus.effects, {
-                    id: `${type}-${crypto.randomUUID()}`,
-                    type,
-                    enabled: true,
-                    parameters: type === 'reverb' ? { decay: 2 } : type === 'delay' ? { delayTime: 0.25, feedback: 0.3 } : { threshold: -1 },
-                  }] })}
-                  className="rounded bg-neutral-300 dark:bg-neutral-700 px-1"
-                >+{type[0].toUpperCase()}</button>
-              ))}
-              {bus.effects.map(effect => (
-                <span key={effect.id} className="inline-flex">
-                  <button
-                    type="button"
-                    aria-pressed={effect.enabled}
-                    aria-label={`${effect.enabled ? 'Disable' : 'Enable'} ${effect.type} on ${bus.name}`}
-                    onClick={() => updateBus(bus.id, { effects: bus.effects.map(item => item.id === effect.id ? { ...item, enabled: !item.enabled } : item) })}
-                    className={effect.enabled ? 'text-emerald-500' : 'text-neutral-500'}
-                  >{effect.type[0].toUpperCase()}</button>
-                  <button type="button" aria-label={`Remove ${effect.type} from ${bus.name}`} onClick={() => updateBus(bus.id, { effects: bus.effects.filter(item => item.id !== effect.id) })}>×</button>
-                </span>
-              ))}
+              <PluginChainEditor
+                ownerId={`bus-${bus.id}`}
+                ownerName={bus.name}
+                plugins={bus.effectPlugins ?? []}
+                onChange={effectPlugins => updateBus(bus.id, { effectPlugins })}
+              />
             </div>
           ))}
         </div>

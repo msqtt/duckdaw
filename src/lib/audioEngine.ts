@@ -9,9 +9,23 @@ import { type TempoPoint, beatsToSecondsWithTempoMap } from './tempoMap';
 import { evaluateAutomationAtBeat, generateAutomationSchedule, type AutomationLane } from './automation';
 
 import { buildMixGraphPlan, type MixGraphPlan } from './mixGraph';
+import {
+  legacyEffectToPluginDescriptor,
+  legacyInstrumentToPluginDescriptor,
+  type EffectPluginInstance,
+  type InstrumentPluginInstance,
+  type PluginRegistry,
+} from './pluginSdk';
+import {
+  getDefaultPluginRegistry,
+  instantiateEffectChain,
+  instantiateInstrumentPlugin,
+} from './pluginRuntime';
 import type { Bus, Send } from './routingGraph';
-class AudioEngine {
-  synths: Map<string, Tone.PolySynth | Tone.Sampler>;
+export class AudioEngine {
+  synths: Map<string, InstrumentPluginInstance>;
+  trackEffectInstances: Map<string, EffectPluginInstance[]>;
+  busEffectInstances: Map<string, EffectPluginInstance[]>;
   audioPlayers: Map<string, Tone.Player>;
   clipGains: Map<string, Tone.Gain>;
   clipEnvelopeScheduleIds: Map<string, number>;
@@ -27,6 +41,8 @@ class AudioEngine {
   reverbs: Map<string, Tone.Reverb>;
   delays: Map<string, Tone.FeedbackDelay>;
   clipSignatures: Map<string, string>;
+  instrumentSignatures: Map<string, string>;
+  trackEffectSignatures: Map<string, string>;
   currentClips: Clip[];
   metronome: Tone.MembraneSynth | null = null;
   cuteSynth: Tone.Synth | null = null;
@@ -38,9 +54,13 @@ class AudioEngine {
   private automationScheduleIds: Map<string, number[]> = new Map();
   private currentTempoTrack: TempoPoint[] = [];
   private currentRoutingPlan: MixGraphPlan | null = null;
+  private readonly pluginRegistry: PluginRegistry;
   
-  constructor() {
+  constructor(pluginRegistry: PluginRegistry = getDefaultPluginRegistry()) {
+    this.pluginRegistry = pluginRegistry;
     this.synths = new Map();
+    this.trackEffectInstances = new Map();
+    this.busEffectInstances = new Map();
     this.audioPlayers = new Map();
     this.clipGains = new Map();
     this.clipEnvelopeScheduleIds = new Map();
@@ -56,6 +76,8 @@ class AudioEngine {
     this.reverbs = new Map();
     this.delays = new Map();
     this.clipSignatures = new Map();
+    this.instrumentSignatures = new Map();
+    this.trackEffectSignatures = new Map();
     this.currentClips = [];
     this.micRecorder = new MicRecorder();
     this.timeSignature = [4, 4];
@@ -195,12 +217,16 @@ class AudioEngine {
     for (const trackId of this.channels.keys()) {
       if (activeTrackIds.has(trackId)) continue;
       this.synths.get(trackId)?.dispose();
+      this.trackEffectInstances.get(trackId)?.forEach(instance => instance.dispose());
       this.trackInputs.get(trackId)?.dispose();
       this.channels.get(trackId)?.dispose();
       this.meters.get(trackId)?.dispose();
       this.reverbs.get(trackId)?.dispose();
       this.delays.get(trackId)?.dispose();
       this.synths.delete(trackId);
+      this.trackEffectInstances.delete(trackId);
+      this.instrumentSignatures.delete(trackId);
+      this.trackEffectSignatures.delete(trackId);
       this.trackInputs.delete(trackId);
       this.channels.delete(trackId);
       this.meters.delete(trackId);
@@ -216,64 +242,66 @@ class AudioEngine {
         const meter = new Tone.Meter();
         const reverb = new Tone.Reverb(2);
         const delay = new Tone.FeedbackDelay("8n", 0.3);
-
         reverb.wet.value = 0;
         delay.wet.value = 0;
         input.connect(channel);
-        channel.chain(delay, reverb, meter);
-
         this.trackInputs.set(track.id, input);
         this.channels.set(track.id, channel);
         this.meters.set(track.id, meter);
         this.reverbs.set(track.id, reverb);
         this.delays.set(track.id, delay);
       }
-      
-      const reverb = this.reverbs.get(track.id);
-      if (reverb) reverb.wet.value = mix.reverbWet;
-      const delay = this.delays.get(track.id);
-      if (delay) delay.wet.value = mix.delayWet;
-      
-      if (track.type === 'midi' && !this.synths.has(track.id)) {
-        let synth;
-        switch(track.instrument) {
-          case 'piano':
-             synth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: 'triangle' },
-                envelope: track.env || { attack: 0.02, decay: 1, sustain: 0.4, release: 1 }
-             });
-             break;
-          case 'bass':
-             synth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: 'sawtooth' },
-                envelope: track.env || { attack: 0.05, decay: 0.3, sustain: 0.2, release: 1 }
-             });
-             break;
-          case 'drum':
-             synth = new Tone.PolySynth(Tone.MembraneSynth);
-             break;
-          case 'synth':
-          default:
-             synth = new Tone.PolySynth(Tone.Synth, {
-                 oscillator: { type: 'square' },
-                 envelope: track.env || { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 }
-             });
-             break;
-        }
-        
-        synth.connect(this.trackInputs.get(track.id)!);
-        this.synths.set(track.id, synth);
-      } else if (track.type === 'midi' && this.synths.has(track.id)) {
-          // Update env if it's a polysynth using Tone.Synth
-          const synth = this.synths.get(track.id);
-          if (track.env && synth && (synth as any).set) {
-              try {
-                (synth as Tone.PolySynth).set({ envelope: track.env });
-              } catch(e) {}
+
+      const reverb = this.reverbs.get(track.id)!;
+      const delay = this.delays.get(track.id)!;
+      reverb.wet.value = mix.reverbWet;
+      delay.wet.value = mix.delayWet;
+
+      if (track.type === 'midi') {
+        const descriptor = track.instrumentPlugin
+          ?? legacyInstrumentToPluginDescriptor(track.instrument, track.env, `instrument-${track.id}`);
+        const signature = JSON.stringify(descriptor);
+        if (this.instrumentSignatures.get(track.id) !== signature) {
+          const replacementPlugin = instantiateInstrumentPlugin(descriptor, this.pluginRegistry);
+          if (replacementPlugin == null) {
+            this.synths.get(track.id)?.dispose();
+            this.synths.delete(track.id);
+          } else {
+            replacementPlugin.instance.node.connect(this.trackInputs.get(track.id)!);
+            this.synths.get(track.id)?.dispose();
+            this.synths.set(track.id, replacementPlugin.instance);
           }
+          this.instrumentSignatures.set(track.id, signature);
+        }
+      } else {
+        this.synths.get(track.id)?.dispose();
+        this.synths.delete(track.id);
+        this.instrumentSignatures.delete(track.id);
       }
-      
+
+      const effectDescriptors = track.effectPlugins ?? [];
+      const effectSignature = JSON.stringify(effectDescriptors);
+      if (this.trackEffectSignatures.get(track.id) !== effectSignature) {
+        const replacements = instantiateEffectChain(effectDescriptors, this.pluginRegistry).map(plugin => plugin.instance);
+        this.trackEffectInstances.get(track.id)?.forEach(instance => instance.dispose());
+        this.trackEffectInstances.set(track.id, replacements);
+        this.trackEffectSignatures.set(track.id, effectSignature);
+      }
+
       const channel = this.channels.get(track.id)!;
+      channel.disconnect?.();
+      for (const instance of this.trackEffectInstances.get(track.id) ?? []) instance.node.disconnect?.();
+      delay.disconnect?.();
+      reverb.disconnect?.();
+      let tail: Tone.ToneAudioNode = channel;
+      for (const instance of this.trackEffectInstances.get(track.id) ?? []) {
+        tail.connect(instance.node);
+        tail = instance.node;
+      }
+      tail.connect(delay);
+      delay.connect(reverb);
+      reverb.connect(this.meters.get(track.id)!);
+
       channel.volume.value = mix.volumeDb;
       channel.pan.value = mix.pan;
       channel.mute = mix.muted;
@@ -292,11 +320,12 @@ class AudioEngine {
 
     for (const meter of this.meters.values()) meter.disconnect?.();
     for (const gain of this.sendGains.values()) gain.dispose();
-    for (const nodes of this.busEffectNodes.values()) nodes.forEach(node => node.dispose());
+    for (const instances of this.busEffectInstances.values()) instances.forEach(instance => instance.dispose());
     for (const input of this.busInputs.values()) input.dispose();
     for (const channel of this.busChannels.values()) channel.dispose();
     for (const output of this.busOutputs.values()) output.dispose();
     this.sendGains.clear();
+    this.busEffectInstances.clear();
     this.busEffectNodes.clear();
     this.busInputs.clear();
     this.busChannels.clear();
@@ -312,25 +341,20 @@ class AudioEngine {
       input.connect(channel);
 
       let tail: Tone.ToneAudioNode = channel;
+      const descriptors = bus.effectPlugins
+        ?? bus.effects.map(legacyEffectToPluginDescriptor);
+      const effects = instantiateEffectChain(descriptors, this.pluginRegistry).map(plugin => plugin.instance);
       const effectNodes: Tone.ToneAudioNode[] = [];
-      for (const effect of bus.effects) {
-        if (!effect.enabled) continue;
-        let node: Tone.ToneAudioNode;
-        if (effect.type === 'reverb') {
-          node = new Tone.Reverb(effect.parameters.decay ?? 2);
-        } else if (effect.type === 'delay') {
-          node = new Tone.FeedbackDelay(effect.parameters.delayTime ?? 0.25, effect.parameters.feedback ?? 0.3);
-        } else {
-          node = new Tone.Limiter(effect.parameters.threshold ?? -1);
-        }
-        tail.connect(node);
-        tail = node;
-        effectNodes.push(node);
+      for (const effect of effects) {
+        tail.connect(effect.node);
+        tail = effect.node;
+        effectNodes.push(effect.node);
       }
       tail.connect(output);
       this.busInputs.set(bus.id, input);
       this.busChannels.set(bus.id, channel);
       this.busOutputs.set(bus.id, output);
+      this.busEffectInstances.set(bus.id, effects);
       this.busEffectNodes.set(bus.id, effectNodes);
     }
 
