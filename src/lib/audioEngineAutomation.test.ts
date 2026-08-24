@@ -7,6 +7,7 @@ const calls = vi.hoisted(() => ({
   bpmRamp: vi.fn(),
   volumeSet: vi.fn(),
   volumeLinear: vi.fn(),
+  pluginParameters: vi.fn(),
 }));
 
 vi.mock('tone', () => {
@@ -69,7 +70,9 @@ vi.mock('tone', () => {
   };
 });
 
-import { engine } from './audioEngine';
+import * as Tone from 'tone';
+import { AudioEngine, engine } from './audioEngine';
+import { PluginRegistry } from './pluginSdk';
 import type { Track } from '../store/dawStore';
 
 describe('AudioEngine tempo and automation scheduling', () => {
@@ -126,5 +129,94 @@ describe('AudioEngine tempo and automation scheduling', () => {
     const ids = calls.schedules.map(item => item.id);
     engine.syncAutomation([]);
     expect(ids.every(id => calls.clears.includes(id))).toBe(true);
+  });
+});
+
+
+describe('AUTO-T02 plugin parameter automation', () => {
+  it('resolves an instrument by descriptor instance ID and merges scheduled parameter values', () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      id: 'example.instrument.test', version: '1.0.0', kind: 'instrument', name: 'Test', description: 'Test instrument',
+      parameters: [
+        { id: 'attack', name: 'Attack', type: 'number', defaultValue: 0.1, min: 0.01, max: 1, step: 0.01 },
+        { id: 'release', name: 'Release', type: 'number', defaultValue: 0.2, min: 0.01, max: 2, step: 0.01 },
+      ],
+      create: parameters => ({
+        node: new Tone.Gain(),
+        triggerAttackRelease: vi.fn(),
+        setParameters: next => calls.pluginParameters(next),
+        dispose: vi.fn(),
+      }),
+    });
+    const localEngine = new AudioEngine(registry);
+    const track: Track = {
+      id: 'plugin-track', name: 'Plugin Track', type: 'midi', volume: 1, pan: 0,
+      isMuted: false, isSolo: false, color: '#fff', reverb: 0, delay: 0,
+      instrument: 'synth',
+      instrumentPlugin: {
+        id: 'instrument-instance', pluginId: 'example.instrument.test', pluginVersion: '1.0.0', enabled: true,
+        parameters: { attack: 0.1, release: 0.2 },
+      },
+      automationLanes: [{
+        id: 'attack-lane', target: 'instrument:instrument-instance:attack', label: 'Attack',
+        range: { min: 0.01, max: 1 }, valueType: 'continuous', enabled: true,
+        points: [
+          { id: 'a', beat: 0, value: 0.2, curve: 'linear' },
+          { id: 'b', beat: 1, value: 0.8, curve: 'step' },
+        ],
+      }, {
+        id: 'release-lane', target: 'instrument:instrument-instance:release', label: 'Release',
+        range: { min: 0.01, max: 2 }, valueType: 'continuous', enabled: true,
+        points: [{ id: 'r', beat: 0, value: 0.7, curve: 'step' }],
+      }],
+    };
+
+    calls.pluginParameters.mockClear();
+    localEngine.syncTracks([track]);
+    localEngine.syncTempoTrack([{ id: 'tempo', beat: 0, bpm: 120, curve: 'step' }]);
+    calls.schedules.length = 0;
+    localEngine.syncAutomation([track]);
+
+    expect(calls.pluginParameters).toHaveBeenCalledWith({ attack: 0.2, release: 0.2 });
+    expect(calls.pluginParameters).toHaveBeenCalledWith({ attack: 0.2, release: 0.7 });
+    const event = calls.schedules.find(item => item.at !== undefined);
+    expect(event).toBeDefined();
+    event!.callback(10);
+    expect(calls.pluginParameters.mock.calls.at(-1)?.[0]).toMatchObject({ release: 0.7 });
+    expect(calls.pluginParameters.mock.calls.at(-1)?.[0].attack).toBeGreaterThan(0.2);
+
+    localEngine.syncAutomation([]);
+    localEngine.syncTracks([]);
+  });
+
+  it('resolves a Track effect parameter by descriptor instance ID', () => {
+    const registry = new PluginRegistry();
+    registry.register({
+      id: 'example.effect.drive', version: '1.0.0', kind: 'effect', name: 'Drive', description: 'Test drive',
+      parameters: [{ id: 'drive', name: 'Drive', type: 'number', defaultValue: 0.2, min: 0, max: 1, step: 0.01 }],
+      create: () => ({ node: new Tone.Gain(), setParameters: next => calls.pluginParameters(next), dispose: vi.fn() }),
+    });
+    const localEngine = new AudioEngine(registry);
+    const track: Track = {
+      id: 'effect-track', name: 'Effect Track', type: 'audio', volume: 1, pan: 0,
+      isMuted: false, isSolo: false, color: '#fff', reverb: 0, delay: 0,
+      effectPlugins: [{
+        id: 'effect-instance', pluginId: 'example.effect.drive', pluginVersion: '1.0.0', enabled: true,
+        parameters: { drive: 0.2 },
+      }],
+      automationLanes: [{
+        id: 'drive-lane', target: 'effect:effect-instance:drive', label: 'Drive',
+        range: { min: 0, max: 1 }, valueType: 'continuous', enabled: true,
+        points: [{ id: 'd', beat: 0, value: 0.75, curve: 'step' }],
+      }],
+    };
+
+    calls.pluginParameters.mockClear();
+    localEngine.syncTracks([track]);
+    localEngine.syncAutomation([track]);
+    expect(calls.pluginParameters).toHaveBeenCalledWith({ drive: 0.75 });
+    localEngine.syncAutomation([]);
+    localEngine.syncTracks([]);
   });
 });

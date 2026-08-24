@@ -19,7 +19,8 @@
 | 钢琴卷帘/量化/MIDI 录音 | FR-MIDI-01~03 | 已实现 | `midiInput.test.ts`, `PianoRoll.tsx`, `DAWApp.tsx` |
 | 音频导入/录音 | FR-AUD-01/02 | 已实现 | `recorder.test.ts`, `ArrangeView.tsx` |
 | 混音/资源生命周期 | FR-MIX-01~03 | 已实现 | `mixSettings.test.ts`, `audioEngine.test.ts` |
-| 统一 Instrument/Effect Plugin SDK | PLUG-SDK-01/02, PLUG-INST-01, PLUG-FX-01, PLUG-FMT-01, PLUG-DEV-01 | 已实现并验证 | `pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `PLUG-E2E-01`；独立复审无 P0/P1 |
+| 统一 Instrument/Effect Plugin SDK | PLUG-SDK-01/02, PLUG-INST-01, PLUG-FX-01, PLUG-FMT-01, PLUG-DEV-01, PLUG-UI-01 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `08-plugin-sdk.md`；`pluginInspectorStore.test.ts`、`pluginUi.test.ts`、`PLUG-E2E-01` |
+| 通用控件 Automation | AUTO-02 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `09-automation.md`；AUTO-T02-01~06、AUTO-E2E-02 |
 | 离线导出 | FR-EXP-01 | 已实现 | `exportPlan.test.ts`, `ExportModal.tsx` |
 | 撤销/主题/反馈/快捷键 | FR-UI-01~04 | 已实现 | `editingInvariants.test.ts`, `complianceContracts.test.ts` |
 
@@ -73,7 +74,9 @@
 | T-MIC-01 | MIME、实际时长、输入关闭 | FR-AUD-02 | `recorder.test.ts` |
 | T-MIX-01 | 共享混音参数、节点 dispose | FR-MIX-02, FR-EXP-01 | `mixSettings.test.ts`, `audioEngine.test.ts` |
 | PLUG-T01~T09 | registry、参数、迁移、未知插件、共享 factory、dispose、Store/UI、内置插件 | Plugin SDK | 已通过：`pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `projectStorage.test.ts` |
-| PLUG-T10~T11 | 三浏览器/a11y 与全质量门禁 | Plugin SDK | 已通过：Playwright Chromium/Firefox/WebKit 21/21；unit、typecheck、build、size、diff、audit 均通过 |
+| PLUG-T10~T12 | 三浏览器/a11y、ordered multi-instance chain 与全质量门禁 | Plugin SDK | 已通过：Playwright Chromium/Firefox/WebKit 24/24；unit 316/316、typecheck、build、size、diff 均通过 |
+| AUTO-T02-01~06 | dynamic target、ensure/undo、Track curve、plugin realtime/offline、package 往返 | AUTO-02 | 已通过：`automationControl.test.ts`, `automationWorkflow.test.ts`, `audioEngineAutomation.test.ts`, `projectStorage.test.ts` |
+| AUTO-E2E-02 | 控件直建、曲线增点/拖点、Instrument/Effect、undo/redo、WAV offline | AUTO-02 | Chromium/Firefox/WebKit 3/3 通过；包含真实 download |
 | T-EXPORT-01 | sample rate、full/selection、空工程 | FR-EXP-01 | `exportPlan.test.ts` |
 | T-UI-01 | Grid/Marker/GitHub/Theme/Toast/A11y 静态契约 | FR-TRN-03/06, FR-PROJ-08, FR-UI-02/03 | `complianceContracts.test.ts` |
 

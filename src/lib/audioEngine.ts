@@ -6,7 +6,7 @@ import { createTrackMixSettings } from './mixSettings';
 import { measurePerf } from './performance';
 import { computeClipPlaybackPlan, createFadeValueCurve } from './audioEditing';
 import { type TempoPoint, beatsToSecondsWithTempoMap } from './tempoMap';
-import { evaluateAutomationAtBeat, generateAutomationSchedule, type AutomationLane } from './automation';
+import { evaluateAutomationAtBeat, generateAutomationSchedule, generateControlAutomationEvents, parseAutomationTarget, type AutomationLane, type ParsedAutomationTarget } from './automation';
 
 import { buildMixGraphPlan, type MixGraphPlan } from './mixGraph';
 import {
@@ -14,6 +14,7 @@ import {
   legacyInstrumentToPluginDescriptor,
   type EffectPluginInstance,
   type InstrumentPluginInstance,
+  type PluginParameterValue,
   type PluginRegistry,
 } from './pluginSdk';
 import {
@@ -25,6 +26,9 @@ import type { Bus, Send } from './routingGraph';
 export class AudioEngine {
   synths: Map<string, InstrumentPluginInstance>;
   trackEffectInstances: Map<string, EffectPluginInstance[]>;
+  trackInstrumentInstanceIds: Map<string, string>;
+  trackEffectInstancesById: Map<string, Map<string, EffectPluginInstance>>;
+  pluginAutomationParameters: Map<string, Record<string, PluginParameterValue>>;
   busEffectInstances: Map<string, EffectPluginInstance[]>;
   audioPlayers: Map<string, Tone.Player>;
   clipGains: Map<string, Tone.Gain>;
@@ -60,6 +64,9 @@ export class AudioEngine {
     this.pluginRegistry = pluginRegistry;
     this.synths = new Map();
     this.trackEffectInstances = new Map();
+    this.trackInstrumentInstanceIds = new Map();
+    this.trackEffectInstancesById = new Map();
+    this.pluginAutomationParameters = new Map();
     this.busEffectInstances = new Map();
     this.audioPlayers = new Map();
     this.clipGains = new Map();
@@ -225,6 +232,11 @@ export class AudioEngine {
       this.delays.get(trackId)?.dispose();
       this.synths.delete(trackId);
       this.trackEffectInstances.delete(trackId);
+      this.trackInstrumentInstanceIds.delete(trackId);
+      this.trackEffectInstancesById.delete(trackId);
+      for (const key of this.pluginAutomationParameters.keys()) {
+        if (key.startsWith(`${trackId}:`)) this.pluginAutomationParameters.delete(key);
+      }
       this.instrumentSignatures.delete(trackId);
       this.trackEffectSignatures.delete(trackId);
       this.trackInputs.delete(trackId);
@@ -266,25 +278,33 @@ export class AudioEngine {
           if (replacementPlugin == null) {
             this.synths.get(track.id)?.dispose();
             this.synths.delete(track.id);
+            this.trackInstrumentInstanceIds.delete(track.id);
           } else {
             replacementPlugin.instance.node.connect(this.trackInputs.get(track.id)!);
             this.synths.get(track.id)?.dispose();
             this.synths.set(track.id, replacementPlugin.instance);
+            this.trackInstrumentInstanceIds.set(track.id, descriptor.id);
+            this.pluginAutomationParameters.set(`${track.id}:${descriptor.id}`, { ...descriptor.parameters });
           }
           this.instrumentSignatures.set(track.id, signature);
         }
       } else {
         this.synths.get(track.id)?.dispose();
         this.synths.delete(track.id);
+        this.trackInstrumentInstanceIds.delete(track.id);
         this.instrumentSignatures.delete(track.id);
       }
 
       const effectDescriptors = track.effectPlugins ?? [];
       const effectSignature = JSON.stringify(effectDescriptors);
       if (this.trackEffectSignatures.get(track.id) !== effectSignature) {
-        const replacements = instantiateEffectChain(effectDescriptors, this.pluginRegistry).map(plugin => plugin.instance);
+        const replacements = instantiateEffectChain(effectDescriptors, this.pluginRegistry);
         this.trackEffectInstances.get(track.id)?.forEach(instance => instance.dispose());
-        this.trackEffectInstances.set(track.id, replacements);
+        this.trackEffectInstances.set(track.id, replacements.map(plugin => plugin.instance));
+        this.trackEffectInstancesById.set(track.id, new Map(replacements.map(plugin => [plugin.descriptor.id, plugin.instance])));
+        for (const plugin of replacements) {
+          this.pluginAutomationParameters.set(`${track.id}:${plugin.descriptor.id}`, { ...plugin.descriptor.parameters });
+        }
         this.trackEffectSignatures.set(track.id, effectSignature);
       }
 
@@ -584,14 +604,37 @@ export class AudioEngine {
 
       for (const lane of track.automationLanes) {
         if (!lane.enabled || lane.points.length === 0) continue;
+        const parsedTarget = parseAutomationTarget(lane.target);
+        if (!parsedTarget) continue;
+        const toSeconds = (beat: number) => beatsToSecondsWithTempoMap(beat, this.currentTempoTrack.length > 0 ? this.currentTempoTrack : [{ id: 'default', beat: 0, bpm: Tone.Transport.bpm.value, curve: 'step' as const }]);
+
+        if (parsedTarget.kind === 'plugin' || parsedTarget.kind === 'track') {
+          const endBeat = lane.points[lane.points.length - 1].beat;
+          const events = generateControlAutomationEvents(
+            lane.points,
+            toSeconds,
+            0,
+            endBeat,
+            1 / 16,
+            lane.valueType === 'discrete' || parsedTarget.kind === 'track',
+          );
+          if (events.length === 0) continue;
+          this.applyControlAutomationValue(track, lane, parsedTarget, events[0].value);
+          for (let index = 1; index < events.length; index += 1) {
+            const entry = events[index];
+            const scheduleId = Tone.Transport.schedule(() => {
+              this.applyControlAutomationValue(track, lane, parsedTarget, entry.value);
+            }, entry.time);
+            scheduleIds.push(scheduleId);
+          }
+          continue;
+        }
 
         // Apply the initial value only after clearing any previously executed AudioParam ramps.
         this.cancelAutomationValues(track.id, lane.target);
         const initialValue = evaluateAutomationAtBeat(lane.points, 0);
         this.applyAutomationValue(track.id, lane.target, initialValue);
 
-        // Generate and schedule the automation plan
-        const toSeconds = (beat: number) => beatsToSecondsWithTempoMap(beat, this.currentTempoTrack.length > 0 ? this.currentTempoTrack : [{ id: 'default', beat: 0, bpm: Tone.Transport.bpm.value, curve: 'step' as const }]);
         const maxBeat = lane.points[lane.points.length - 1].beat + 1;
         const schedule = generateAutomationSchedule(lane.points, toSeconds, 0, maxBeat);
 
@@ -627,6 +670,43 @@ export class AudioEngine {
       case 'delay': return this.delays.get(trackId)?.wet;
       case 'masterVolume': return Tone.Destination.volume;
       default: return undefined;
+    }
+  }
+
+  private applyControlAutomationValue(
+    track: Track,
+    lane: AutomationLane,
+    target: Extract<ParsedAutomationTarget, { kind: 'track' | 'plugin' }>,
+    value: number,
+  ): void {
+    if (target.kind === 'track') {
+      const channel = this.channels.get(track.id);
+      if (!channel) return;
+      if (target.parameter === 'mute') channel.mute = value >= 0.5;
+      else channel.solo = value >= 0.5;
+      return;
+    }
+
+    const descriptor = target.pluginKind === 'instrument'
+      ? (track.instrumentPlugin?.id === target.instanceId ? track.instrumentPlugin : undefined)
+      : (track.effectPlugins ?? []).find(candidate => candidate.id === target.instanceId);
+    const instance = target.pluginKind === 'instrument'
+      ? (this.trackInstrumentInstanceIds.get(track.id) === target.instanceId ? this.synths.get(track.id) : undefined)
+      : this.trackEffectInstancesById.get(track.id)?.get(target.instanceId);
+    if (!descriptor || !instance) return;
+
+    const key = `${track.id}:${target.instanceId}`;
+    const parameters = this.pluginAutomationParameters.get(key) ?? { ...descriptor.parameters };
+    const nextValue: PluginParameterValue = lane.values == null
+      ? value
+      : lane.values[Math.max(0, Math.min(lane.values.length - 1, Math.round(value)))];
+    if (nextValue == null) return;
+    const next = { ...parameters, [target.parameterId]: nextValue };
+    try {
+      instance.setParameters(next);
+      this.pluginAutomationParameters.set(key, next);
+    } catch (error) {
+      console.error(`DuckDAW plugin automation failed: ${descriptor.pluginId}`, error);
     }
   }
 

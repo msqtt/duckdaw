@@ -19,9 +19,10 @@ import {
   legacyInstrumentToPluginDescriptor,
   type EffectPluginInstance,
   type InstrumentPluginInstance,
+  type PluginParameterValue,
 } from '../../lib/pluginSdk';
 import { instantiateEffectChain, instantiateInstrumentPlugin } from '../../lib/pluginRuntime';
-import { generateAutomationSchedule } from '../../lib/automation';
+import { generateAutomationSchedule, generateControlAutomationEvents, parseAutomationTarget } from '../../lib/automation';
 import { beatsToSecondsWithTempoMap } from '../../lib/tempoMap';
 
 let ffmpeg: FFmpeg | null = null;
@@ -108,10 +109,12 @@ export function ExportModal() {
           try {
             return await Tone.Offline(async () => {
              Tone.Transport.bpm.value = bpm;
-             Tone.Destination.volume.value = masterVolume === 0 ? -Infinity : 20 * Math.log10(masterVolume);
+             Tone.getDestination().volume.value = masterVolume === 0 ? -Infinity : 20 * Math.log10(masterVolume);
              Tone.getContext().lookAhead = 0;
 
              const synths = new Map<string, InstrumentPluginInstance>();
+             const pluginInstances = new Map<string, InstrumentPluginInstance | EffectPluginInstance>();
+             const pluginParameters = new Map<string, Record<string, PluginParameterValue>>();
              const trackInputs = new Map<string, Tone.Gain>();
              const trackOutputs = new Map<string, Tone.Gain>();
              const trackChannels = new Map<string, Tone.Channel>();
@@ -139,8 +142,13 @@ export function ExportModal() {
                  delay.wet.value = mix.delayWet;
                  input.connect(channel);
                  let trackTail: Tone.ToneAudioNode = channel;
-                 const trackEffects = instantiateEffectChain(track.effectPlugins ?? []).map(plugin => plugin.instance);
+                 const instantiatedTrackEffects = instantiateEffectChain(track.effectPlugins ?? []);
+                 const trackEffects = instantiatedTrackEffects.map(plugin => plugin.instance);
                  ownedPluginInstances.push(...trackEffects);
+                 for (const plugin of instantiatedTrackEffects) {
+                   pluginInstances.set(`${track.id}:${plugin.descriptor.id}`, plugin.instance);
+                   pluginParameters.set(`${track.id}:${plugin.descriptor.id}`, { ...plugin.descriptor.parameters });
+                 }
                  for (const effect of trackEffects) {
                    trackTail.connect(effect.node);
                    trackTail = effect.node;
@@ -162,6 +170,8 @@ export function ExportModal() {
                      if (instrument != null) {
                        instrument.instance.node.connect(input);
                        synths.set(track.id, instrument.instance);
+                       pluginInstances.set(`${track.id}:${descriptor.id}`, instrument.instance);
+                       pluginParameters.set(`${track.id}:${descriptor.id}`, { ...descriptor.parameters });
                        ownedPluginInstances.push(instrument.instance);
                      }
                  }
@@ -188,8 +198,8 @@ export function ExportModal() {
                  busOutputs.set(bus.id, output);
              }
 
-             const endpoint = (id: string): Tone.ToneAudioNode | typeof Tone.Destination | undefined => {
-                 if (id === 'destination') return Tone.Destination;
+             const endpoint = (id: string): Tone.ToneAudioNode | ReturnType<typeof Tone.getDestination> | undefined => {
+                 if (id === 'destination') return Tone.getDestination();
                  const trackMatch = /^track:(.+):(pre|post)$/.exec(id);
                  if (trackMatch) return trackMatch[2] === 'pre' ? trackInputs.get(trackMatch[1]) : trackOutputs.get(trackMatch[1]);
                  const busMatch = /^bus:(.+):(input|pre|post)$/.exec(id);
@@ -209,14 +219,68 @@ export function ExportModal() {
                  }
              }
 
+             const scheduleOfflineControl = (callback: () => void, time: number) => {
+               const context = Tone.getContext() as unknown as { setTimeout: (callback: () => void, seconds: number) => unknown };
+               context.setTimeout(callback, Math.max(0, time));
+             };
+
              for (const track of tracks) {
                for (const lane of track.automationLanes ?? []) {
                  if (!lane.enabled || lane.points.length === 0) continue;
+                 const parsedTarget = parseAutomationTarget(lane.target);
+                 if (!parsedTarget) continue;
+
+                 if (parsedTarget.kind === 'plugin' || parsedTarget.kind === 'track') {
+                   const lastBeat = lane.points[lane.points.length - 1].beat;
+                   const endBeat = Math.max(plan.startBeat, Math.min(plan.endBeat, lastBeat));
+                   const events = generateControlAutomationEvents(
+                     lane.points,
+                     plan.secondsAtBeat,
+                     plan.startBeat,
+                     endBeat,
+                     1 / 16,
+                     lane.valueType === 'discrete' || parsedTarget.kind === 'track',
+                   );
+                   for (const event of events) {
+                     if (parsedTarget.kind === 'track') {
+                       const channel = trackChannels.get(track.id);
+                       if (!channel) continue;
+                       scheduleOfflineControl(() => {
+                         if (parsedTarget.parameter === 'mute') channel.mute = event.value >= 0.5;
+                         else channel.solo = event.value >= 0.5;
+                       }, event.time);
+                       continue;
+                     }
+
+                     const descriptor = parsedTarget.pluginKind === 'instrument'
+                       ? (track.instrumentPlugin?.id === parsedTarget.instanceId ? track.instrumentPlugin : undefined)
+                       : (track.effectPlugins ?? []).find(candidate => candidate.id === parsedTarget.instanceId);
+                     const key = `${track.id}:${parsedTarget.instanceId}`;
+                     const instance = pluginInstances.get(key);
+                     if (!descriptor || !instance) continue;
+                     scheduleOfflineControl(() => {
+                       const current = pluginParameters.get(key) ?? { ...descriptor.parameters };
+                       const nextValue: PluginParameterValue = lane.values == null
+                         ? event.value
+                         : lane.values[Math.max(0, Math.min(lane.values.length - 1, Math.round(event.value)))];
+                       if (nextValue == null) return;
+                       const next = { ...current, [parsedTarget.parameterId]: nextValue };
+                       try {
+                         instance.setParameters(next);
+                         pluginParameters.set(key, next);
+                       } catch {
+                         // A failing automation callback bypasses only this plugin event.
+                       }
+                     }, event.time);
+                   }
+                   continue;
+                 }
+
                  const param: any = lane.target === 'volume' ? trackChannels.get(track.id)?.volume
                    : lane.target === 'pan' ? trackChannels.get(track.id)?.pan
                      : lane.target === 'reverb' ? trackReverbs.get(track.id)?.wet
                        : lane.target === 'delay' ? trackDelays.get(track.id)?.wet
-                         : Tone.Destination.volume;
+                         : Tone.getDestination().volume;
                  if (!param) continue;
                  const schedule = generateAutomationSchedule(lane.points, plan.secondsAtBeat, plan.startBeat, plan.endBeat);
                  for (const entry of schedule) {

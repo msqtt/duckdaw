@@ -14,6 +14,7 @@
 | [06-compliance-audit.md](./06-compliance-audit.md) | 33 条需求代码审计与 SDD/TDD 实施基线 | 维护者、开发、测试 |
 | [07-next-generation-optimization.md](./07-next-generation-optimization.md) | 性能、交互、专业编辑、E2E 与 Cloudflare 双环境的执行规格 | 产品、开发、运维、测试 |
 | [08-plugin-sdk.md](./08-plugin-sdk.md) | 浏览器原生统一 Instrument/Effect Plugin SDK、生命周期、迁移与验收合同 | 插件开发者、开发、测试 |
+| [09-automation.md](./09-automation.md) | FL Studio 风格通用控件 Automation target、轨道曲线、实时/离线和验收合同 | 产品、开发、测试 |
 
 ## 2. 权威性
 
@@ -23,9 +24,10 @@
 2. `docs/specs/02-functional-requirements.md` 对用户可见行为具有最高优先级；
 3. `docs/specs/03-technical-design.md` 约束实现方式和不变量；
 4. `docs/specs/08-plugin-sdk.md` 对统一插件 API、生命周期、安全边界和插件持久化语义具有最高优先级；
-5. `docs/specs/07-next-generation-optimization.md` 对下一代增量需求、性能预算和发布拓扑具有最高优先级；
-6. `docs/specs/05-delivery-plan.md` 记录已交付基线，不改变目标需求；
-7. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
+5. `docs/specs/09-automation.md` 对通用 Automation target、控件入口、轨道曲线及实时/离线参数调度具有最高优先级；
+6. `docs/specs/07-next-generation-optimization.md` 对下一代增量需求、性能预算和发布拓扑具有最高优先级；
+7. `docs/specs/05-delivery-plan.md` 记录已交付基线，不改变目标需求；
+8. `docs/` 下其余文档均为历史设计、分析或验证记录，不作为当前实现状态的唯一依据。
 
 若代码与规范不一致，不应静默修改规范以迎合缺陷；应在交付计划中记录差距，并决定修代码或显式变更需求。
 

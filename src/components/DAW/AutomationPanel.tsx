@@ -2,10 +2,10 @@ import React, { useState, useCallback } from 'react';
 import { useDAWStore } from '../../store/dawStore';
 import { useShallow } from 'zustand/react/shallow';
 import { Plus, Trash2, Power, X } from 'lucide-react';
-import type { AutomationTarget, AutomationCurve } from '../../lib/automation';
-import { AUTOMATION_RANGES } from '../../lib/automation';
+import type { LegacyAutomationTarget, AutomationCurve, AutomationLane } from '../../lib/automation';
+import { getAutomationLabel, getAutomationRange } from '../../lib/automation';
 
-const TARGET_LABELS: Record<AutomationTarget, string> = {
+const TARGET_LABELS: Record<LegacyAutomationTarget, string> = {
   volume: 'Volume',
   pan: 'Pan',
   reverb: 'Reverb',
@@ -31,7 +31,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
   })));
 
   const selectedTrack = tracks.find(t => t.id === selectedTrackId);
-  const [addTarget, setAddTarget] = useState<AutomationTarget>('volume');
+  const [addTarget, setAddTarget] = useState<LegacyAutomationTarget>('volume');
   const [editingPoint, setEditingPoint] = useState<{ laneId: string; pointId: string } | null>(null);
   const [editBeat, setEditBeat] = useState('');
   const [editValue, setEditValue] = useState('');
@@ -48,13 +48,13 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     addAutomationLane(selectedTrackId, addTarget);
   }, [selectedTrackId, addTarget, addAutomationLane]);
 
-  const handleAddPoint = useCallback((laneId: string, target: AutomationTarget) => {
+  const handleAddPoint = useCallback((lane: AutomationLane) => {
     if (!selectedTrackId) return;
     const beat = parseFloat(newBeat);
     const value = parseFloat(newValue);
-    const range = AUTOMATION_RANGES[target];
-    if (!Number.isFinite(beat) || beat < 0 || !Number.isFinite(value) || value < range.min || value > range.max) return;
-    addAutomationPoint(selectedTrackId, laneId, { beat, value, curve: newCurve });
+    const range = getAutomationRange(lane.target, lane);
+    if (!range || !Number.isFinite(beat) || beat < 0 || !Number.isFinite(value) || value < range.min || value > range.max) return;
+    addAutomationPoint(selectedTrackId, lane.id, { beat, value, curve: lane.valueType === 'discrete' ? 'step' : newCurve });
     setNewPointLaneId(null);
   }, [selectedTrackId, newBeat, newValue, newCurve, addAutomationPoint]);
 
@@ -65,18 +65,18 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     setEditCurve(curve);
   }, []);
 
-  const handleSaveEdit = useCallback((target: AutomationTarget) => {
+  const handleSaveEdit = useCallback((lane: AutomationLane) => {
     if (!editingPoint || !selectedTrackId) return;
     const beat = parseFloat(editBeat);
     const value = parseFloat(editValue);
-    const range = AUTOMATION_RANGES[target];
-    if (!Number.isFinite(beat) || beat < 0 || !Number.isFinite(value) || value < range.min || value > range.max) return;
-    updateAutomationPoint(selectedTrackId, editingPoint.laneId, editingPoint.pointId, { beat, value, curve: editCurve });
+    const range = getAutomationRange(lane.target, lane);
+    if (!range || !Number.isFinite(beat) || beat < 0 || !Number.isFinite(value) || value < range.min || value > range.max) return;
+    updateAutomationPoint(selectedTrackId, editingPoint.laneId, editingPoint.pointId, { beat, value, curve: lane.valueType === 'discrete' ? 'step' : editCurve });
     setEditingPoint(null);
   }, [editingPoint, selectedTrackId, editBeat, editValue, editCurve, updateAutomationPoint]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent, target: AutomationTarget) => {
-    if (e.key === 'Enter') handleSaveEdit(target);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent, lane: AutomationLane) => {
+    if (e.key === 'Enter') handleSaveEdit(lane);
     else if (e.key === 'Escape') { setEditingPoint(null); setNewPointLaneId(null); }
   }, [handleSaveEdit]);
 
@@ -102,11 +102,11 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-1 mb-2">
         <select
           value={addTarget}
-          onChange={e => setAddTarget(e.target.value as AutomationTarget)}
+          onChange={e => setAddTarget(e.target.value as LegacyAutomationTarget)}
           className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-xs"
           aria-label="Target parameter"
         >
-          {(Object.keys(TARGET_LABELS) as AutomationTarget[]).map(t => (
+          {(Object.keys(TARGET_LABELS) as LegacyAutomationTarget[]).map(t => (
             <option key={t} value={t}>{TARGET_LABELS[t]}</option>
           ))}
         </select>
@@ -123,12 +123,12 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       {selectedTrack.automationLanes.map(lane => (
         <div key={lane.id} className="border border-gray-700 rounded mb-2 p-2">
           <div className="flex items-center justify-between mb-1">
-            <span className="font-medium">{TARGET_LABELS[lane.target] || lane.target}</span>
+            <span className="font-medium">{getAutomationLabel(lane) || lane.target}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => toggleAutomationLane(selectedTrackId!, lane.id)}
                 className={`p-0.5 rounded ${lane.enabled ? 'text-green-400' : 'text-gray-500'}`}
-                aria-label={`${lane.enabled ? 'Disable' : 'Enable'} ${TARGET_LABELS[lane.target]} automation`}
+                aria-label={`${lane.enabled ? 'Disable' : 'Enable'} ${getAutomationLabel(lane)} automation`}
                 aria-pressed={lane.enabled}
               >
                 <Power size={12} />
@@ -136,7 +136,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               <button
                 onClick={() => deleteAutomationLane(selectedTrackId!, lane.id)}
                 className="p-0.5 hover:bg-red-900 rounded text-red-400"
-                aria-label={`Delete ${TARGET_LABELS[lane.target]} lane`}
+                aria-label={`Delete ${getAutomationLabel(lane)} lane`}
               >
                 <Trash2 size={11} />
               </button>
@@ -144,7 +144,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* Points */}
-          <table className="w-full text-left" role="grid" aria-label={`${TARGET_LABELS[lane.target]} automation points`}>
+          <table className="w-full text-left" role="grid" aria-label={`${getAutomationLabel(lane)} automation points`}>
             <thead>
               <tr className="border-b border-gray-700 text-gray-400">
                 <th className="py-0.5 px-1">Beat</th>
@@ -167,20 +167,20 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   {editingPoint?.pointId === point.id ? (
                     <>
                       <td className="py-0.5 px-1">
-                        <input type="number" value={editBeat} onChange={e => setEditBeat(e.target.value)} onKeyDown={e => handleKeyDown(e, lane.target)} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" min={0} step={0.25} aria-label="Beat" autoFocus />
+                        <input type="number" value={editBeat} onChange={e => setEditBeat(e.target.value)} onKeyDown={e => handleKeyDown(e, lane)} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" min={0} step={0.25} aria-label="Beat" autoFocus />
                       </td>
                       <td className="py-0.5 px-1">
-                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => handleKeyDown(e, lane.target)} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" step={0.01} aria-label="Value" />
+                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => handleKeyDown(e, lane)} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" step={0.01} aria-label="Value" />
                       </td>
                       <td className="py-0.5 px-1">
-                        <select value={editCurve} onChange={e => setEditCurve(e.target.value as AutomationCurve)} onKeyDown={e => handleKeyDown(e, lane.target)} className="bg-gray-800 border border-gray-600 rounded text-xs" aria-label="Curve">
+                        <select value={editCurve} onChange={e => setEditCurve(e.target.value as AutomationCurve)} onKeyDown={e => handleKeyDown(e, lane)} className="bg-gray-800 border border-gray-600 rounded text-xs" aria-label="Curve">
                           <option value="step">Step</option>
                           <option value="linear">Linear</option>
                           <option value="exponential">Exp</option>
                         </select>
                       </td>
                       <td className="py-0.5 px-1 text-right">
-                        <button onClick={() => handleSaveEdit(lane.target)} className="text-green-400 px-1" aria-label="Save point">✓</button>
+                        <button onClick={() => handleSaveEdit(lane)} className="text-green-400 px-1" aria-label="Save point">✓</button>
                       </td>
                     </>
                   ) : (
@@ -200,10 +200,10 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               {newPointLaneId === lane.id && (
                 <tr className="border-b border-gray-800 bg-gray-850">
                   <td className="py-0.5 px-1">
-                    <input type="number" value={newBeat} onChange={e => setNewBeat(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddPoint(lane.id, lane.target); else if (e.key === 'Escape') setNewPointLaneId(null); }} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" min={0} step={0.25} aria-label="New beat" autoFocus />
+                    <input type="number" value={newBeat} onChange={e => setNewBeat(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddPoint(lane); else if (e.key === 'Escape') setNewPointLaneId(null); }} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" min={0} step={0.25} aria-label="New beat" autoFocus />
                   </td>
                   <td className="py-0.5 px-1">
-                    <input type="number" value={newValue} onChange={e => setNewValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddPoint(lane.id, lane.target); else if (e.key === 'Escape') setNewPointLaneId(null); }} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" step={0.01} aria-label="New value" />
+                    <input type="number" value={newValue} onChange={e => setNewValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddPoint(lane); else if (e.key === 'Escape') setNewPointLaneId(null); }} className="w-12 bg-gray-800 border border-gray-600 rounded px-1 text-xs" step={0.01} aria-label="New value" />
                   </td>
                   <td className="py-0.5 px-1">
                     <select value={newCurve} onChange={e => setNewCurve(e.target.value as AutomationCurve)} className="bg-gray-800 border border-gray-600 rounded text-xs" aria-label="New curve">
@@ -213,7 +213,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                     </select>
                   </td>
                   <td className="py-0.5 px-1 text-right">
-                    <button onClick={() => handleAddPoint(lane.id, lane.target)} className="text-green-400 px-1" aria-label="Confirm add point">✓</button>
+                    <button onClick={() => handleAddPoint(lane)} className="text-green-400 px-1" aria-label="Confirm add point">✓</button>
                   </td>
                 </tr>
               )}

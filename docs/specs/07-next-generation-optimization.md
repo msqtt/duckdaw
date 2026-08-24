@@ -280,6 +280,7 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | ID | 需求 | 核心测试 |
 |---|---|---|
 | AUTO-01 | Volume/Pan/Reverb/Delay Automation | evaluator/ramp test |
+| AUTO-02 | 任意稳定 Track/Instrument/Effect 参数控件直接创建 Automation，并在所属 Track 编辑曲线；详见 `09-automation.md` | target/store/curve/realtime-offline/E2E |
 | TEMPO-01 | Step/Linear Tempo Map 和双向积分 | property/fixture test |
 | MIX-ROUTE-01 | Bus/Group/Send DAG | cycle/reference test |
 | MIX-ROUTE-02 | 实时/离线共用图构建 | graph snapshot test |
@@ -334,4 +335,5 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | D MIDI 与专业录音 | 已实现：SMF Type 0/1 import/export 实际按钮（Settings），导入写入 tracks/clips、导出当前 MIDI 下载；Velocity Lane pointer-drag 编辑（pause/resume 单 undo）；Transpose/Humanize/Legato toolbar 按钮接入 transformNotesInClip；MIDI/Audio 设备枚举 select 传 exact deviceId 给 connectMidiInputs/getUserMedia（unsupported 可见降级）；0/1/2/4 bar count-in 用户可配置并实际延迟录音启动（aria-live 倒计时）；InputMeter 挂载接收 MIDI noteOn velocity 和麦克风 dBFS analyser（clipping aria-live、原始流停止释放）；overdub 检测 existing clip 自动调用 commitOverdubRecording；Takes 可在 ClipItem 切换（switchTake） | 1.2.0 | 0.2.0-beta.2 |
 | E Automation/Tempo/Mix/Export | 已实现并验证：step/linear Tempo Map 精确积分/逆解；Automation 校验、UI、undo 与实时/离线调度；v2 Master Bus/Bus/Send DAG、共享 Mix Graph；动态 Tempo export、0..30s tail、normalize→limiter→encode、PCM16 WAV 与 Track stems；v1.x 原子迁移 | 2.0.0 | 0.3.0-rc.1 |
 | F E2E/CI/CD/Release | 已实现并验证：GitHub baseline SHA/409 四路原子事务；exact 依赖与 0 audit；Chromium/Firefox/WebKit 18/18 产品 E2E；axe serious/critical；CI、Netlify staging context、部署 metadata、staging smoke 与 manual release workflow；FFmpeg notice/GPL/source 随部署并由 smoke 验证 | 2.0.0 | 0.3.0-rc.1 |
-| G Browser Plugin SDK | 已实现并验证：统一 Instrument/Effect definition、descriptor、registry、生命周期和静态注册安全边界；2.1 原子迁移与 unknown 保留/fallback/bypass；实时/离线共享 factory；5+5 内置插件；Mixer Track/Bus UI 与 undo；三浏览器 PLUG-E2E；独立复审无 P0/P1 | 2.1.0 | 0.4.0 |
+| G Browser Plugin SDK | 核心与 PLUG-UI-01 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | 2.1.0 | 0.4.0 |
+| H 通用控件 Automation | AUTO-02 已实现；domain/store/audio/package、三浏览器真实控件→曲线→plugin→offline 路径及独立复审全部通过，无 P0/P1 | 2.1.0 optional extension | 0.4.0 |

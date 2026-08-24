@@ -363,10 +363,35 @@ it('rejects invalid track automation in a v2 package before returning project st
 });
 
 
+it('round-trips dynamic plugin automation metadata and rejects missing ranges', async () => {
+  const blob = await createDuckDawPackage('Dynamic Automation');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const project = JSON.parse(await zip.file('project.json')!.async('text'));
+  project.tracks[0].automationLanes = [{
+    id: 'lane-plugin', target: 'instrument:instrument-track-1:wave', label: 'Wave',
+    range: { min: 0, max: 3 }, valueType: 'discrete', values: ['sine', 'triangle', 'square', 'sawtooth'],
+    enabled: true,
+    points: [
+      { id: 'point-0', beat: 0, value: 2, curve: 'step' },
+      { id: 'point-1', beat: 4, value: 3, curve: 'step' },
+    ],
+  }];
+  zip.file('project.json', JSON.stringify(project));
+
+  const loaded = await loadDuckDawPackage(await zip.generateAsync({ type: 'blob' }));
+  expect(loaded.project.tracks[0].automationLanes[0]).toEqual(project.tracks[0].automationLanes[0]);
+
+  delete project.tracks[0].automationLanes[0].range;
+  zip.file('project.json', JSON.stringify(project));
+  await expect(loadDuckDawPackage(await zip.generateAsync({ type: 'blob' })))
+    .rejects.toThrow(/automation/i);
+});
+
 it('migrates a v1.2 package to a beat-zero tempo point and Master Bus routing', async () => {
   const zip = new JSZip();
   zip.file('manifest.json', JSON.stringify({
     format: 'duckdaw', version: '1.2.0', projectId: 'legacy-v12',
+
     name: 'Legacy v1.2', bpm: 110, timeSignature: [4, 4],
     createdAt: '2026-01-01T00:00:00.000Z',
     resources: { samples: [], presets: [] },

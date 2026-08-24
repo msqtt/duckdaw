@@ -225,11 +225,19 @@ interface AutomationPointV1_2 {
   curve: 'step' | 'linear' | 'exponential';
 }
 
-interface AutomationLaneV1_2 {
+interface AutomationLaneV2_1 {
   id: string;
-  target: 'volume' | 'pan' | 'reverb' | 'delay' | 'masterVolume';
+  target:
+    | 'volume' | 'pan' | 'reverb' | 'delay' | 'masterVolume'
+    | 'track.mute' | 'track.solo'
+    | `instrument:${string}:${string}`
+    | `effect:${string}:${string}`;
   enabled: boolean;
   points: AutomationPointV1_2[];        // ID/beat 唯一，按 beat 稳定排序
+  label?: string;                       // 通用控件显示名，1..160
+  range?: { min: number; max: number }; // dynamic target 必需；finite，min < max
+  valueType?: 'continuous' | 'discrete';
+  values?: string[];                    // enum index→value 快照；非空且唯一
 }
 
 interface TempoPointV2 {
@@ -267,7 +275,7 @@ interface SendV2 {
 }
 ```
 
-Tempo、Bus output 和 Bus-origin Send 共同参与 DAG 校验；拒绝环、悬空引用、重复 ID、多个 destination-root Bus 和二义性 Send source。Track automation 的 volume/reverb/delay/masterVolume 值域为 `0..1`，pan 为 `-1..1`；指数段两端必须严格大于 0。
+Tempo、Bus output 和 Bus-origin Send 共同参与 DAG 校验；拒绝环、悬空引用、重复 ID、多个 destination-root Bus 和二义性 Send source。旧 Track automation 的 volume/reverb/delay/masterVolume 值域为 `0..1`，pan 为 `-1..1`；`track.mute/track.solo` 为 `0..1` discrete step；Instrument/Effect dynamic target 必须带合法 `range`，enum 还必须带稳定 `values` 快照。连续指数段两端必须严格大于 0，discrete lane 只能使用整数 step 点。
 
 v1.x→v2.0 迁移生成 beat 0 的 step TempoPoint、唯一 Master Bus、所有 Track 的 `outputBusId = 'master'` 和空 Sends。v2.0→v2.1 再把 legacy instrument/env 与 Bus effects 映射为 Plugin SDK descriptor，并为 Track effectPlugins 生成空数组。2.1 写出器保留 legacy 镜像；未知结构有效插件原样往返。任一迁移或校验失败时不得替换当前工程。
 

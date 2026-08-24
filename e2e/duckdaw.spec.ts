@@ -129,29 +129,43 @@ test('E2E-02 dirty edits create a restorable recovery snapshot', async ({ page }
   await expect(page.getByTestId('track-header')).toHaveCount(1);
 });
 
-test('PLUG-E2E-01 selects an instrument and edits a track effect as undoable plugin transactions', async ({ page }) => {
+test('PLUG-E2E-01 uses Track instrument selection and a right-side Inspector for ordered Mixer effects', async ({ page }) => {
   await openApp(page);
   await newProject(page);
   await addTrack(page, 'midi');
-  await page.getByRole('button', { name: 'Toggle mixer' }).click();
-  await expect(page.getByText('MIXER', { exact: true })).toBeVisible();
 
   const instrument = page.getByLabel('Instrument for Inst 1');
   await instrument.selectOption('duckdaw.instrument.pluck');
   await expect(instrument).toHaveValue('duckdaw.instrument.pluck');
+  await page.getByRole('button', { name: 'Open instrument details for Inst 1' }).click();
+  const inspector = page.getByRole('complementary', { name: 'Plugin Inspector' });
+  await expect(inspector).toBeVisible();
+  await expect(inspector.getByRole('heading', { name: 'Pluck' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close plugin inspector' }).click();
 
-  const addEffect = page.getByLabel('Add effect to Inst 1');
+  await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  await expect(page.getByText('MIXER', { exact: true })).toBeVisible();
+  const channel = page.getByTestId('mixer-channel');
+  const addEffect = channel.getByLabel('Add effect to Inst 1');
   await addEffect.selectOption('duckdaw.effect.distortion');
-  const enabledEffect = page.getByRole('button', {
-    name: 'Disable duckdaw.effect.distortion on Inst 1',
-  });
-  await expect(enabledEffect).toBeVisible();
-  await page.getByLabel('Drive for duckdaw.effect.distortion').fill('0.8');
+  await addEffect.selectOption('duckdaw.effect.chorus');
 
+  const chainItems = channel.getByTestId('plugin-chain-item');
+  await expect(chainItems).toHaveCount(2);
+  await expect(chainItems.nth(0)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.distortion');
+  await expect(chainItems.nth(1)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.chorus');
+  await expect(channel.getByLabel('Drive for duckdaw.effect.distortion')).toHaveCount(0);
+
+  await channel.getByRole('button', { name: 'Open Distortion details on Inst 1' }).click();
+  await expect(inspector.getByRole('heading', { name: 'Distortion' })).toBeVisible();
+  await inspector.getByLabel('Drive for duckdaw.effect.distortion').fill('0.8');
+
+  await channel.getByRole('button', { name: 'Move Chorus up on Inst 1' }).click();
+  await expect(chainItems.nth(0)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.chorus');
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(page.getByLabel('Drive for duckdaw.effect.distortion')).not.toHaveValue('0.8');
+  await expect(chainItems.nth(0)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.distortion');
   await page.getByRole('button', { name: 'Redo' }).click();
-  await expect(page.getByLabel('Drive for duckdaw.effect.distortion')).toHaveValue('0.8');
+  await expect(chainItems.nth(0)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.chorus');
 });
 
 test('E2E-03 unsupported FSA, Web MIDI, and microphone APIs use visible fallbacks', async ({ page }) => {
@@ -165,6 +179,58 @@ test('E2E-03 unsupported FSA, Web MIDI, and microphone APIs use visible fallback
   await page.getByRole('button', { name: 'Save File' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('project.duckdaw');
+});
+
+test('AUTO-E2E-02 creates control and plugin automation directly on the owning track curve', async ({ page }) => {
+  await openApp(page);
+  await newProject(page);
+  await addTrack(page, 'midi');
+  await page.getByTestId('track-lane').dblclick({ position: { x: 40, y: 40 } });
+  await expect(page.getByTestId('clip-item')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Create automation for Volume on Inst 1' }).click();
+  const volumeCurve = page.getByRole('region', { name: 'Automation curve for Volume on Inst 1' });
+  await expect(volumeCurve).toBeVisible();
+  await expect(volumeCurve.getByRole('button', { name: /Automation point.*beat 0/ })).toHaveCount(1);
+  await volumeCurve.dblclick({ position: { x: 120, y: 25 } });
+  await expect(volumeCurve.getByRole('button', { name: /Automation point/ })).toHaveCount(2);
+  const movedPoint = volumeCurve.getByRole('button', { name: /Automation point/ }).nth(1);
+  const originalPointLabel = await movedPoint.getAttribute('aria-label');
+  const pointBox = await movedPoint.boundingBox();
+  expect(pointBox).not.toBeNull();
+  await page.mouse.move(pointBox!.x + pointBox!.width / 2, pointBox!.y + pointBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pointBox!.x + 60, pointBox!.y + 30, { steps: 3 });
+  await page.mouse.up();
+  await expect(movedPoint).not.toHaveAttribute('aria-label', originalPointLabel!);
+  const draggedPointLabel = await movedPoint.getAttribute('aria-label');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(movedPoint).toHaveAttribute('aria-label', originalPointLabel!);
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(movedPoint).toHaveAttribute('aria-label', draggedPointLabel!);
+
+  await page.getByRole('button', { name: 'Open instrument details for Inst 1' }).click();
+  const inspector = page.getByRole('complementary', { name: 'Plugin Inspector' });
+  await inspector.getByRole('button', { name: 'Create automation for Attack on Inst 1' }).click();
+  await expect(page.getByRole('region', { name: 'Automation curve for Attack on Inst 1' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  const channel = page.getByTestId('mixer-channel');
+  await channel.getByLabel('Add effect to Inst 1').selectOption('duckdaw.effect.distortion');
+  await inspector.getByRole('button', { name: 'Create automation for Drive on Inst 1' }).click();
+  await expect(page.getByRole('region', { name: 'Automation curve for Drive on Inst 1' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('region', { name: 'Automation curve for Attack on Inst 1' })).toBeVisible();
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(page.getByRole('region', { name: 'Automation curve for Drive on Inst 1' })).toBeVisible();
+
+  const audioDownload = page.waitForEvent('download').then(download => ({ kind: 'download' as const, name: download.suggestedFilename() }));
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Start Export' }).click();
+  const exportFailed = page.getByText(/Export failed:/).textContent().then(message => ({ kind: 'error' as const, message }));
+  const exportResult = await Promise.race([audioDownload, exportFailed]);
+  expect(exportResult).toEqual({ kind: 'download', name: expect.stringMatching(/\.wav$/) });
 });
 
 test('@smoke app metadata, SPA fallback, and serious accessibility gate', async ({ page }) => {

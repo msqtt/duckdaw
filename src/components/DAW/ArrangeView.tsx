@@ -8,10 +8,13 @@ import { beatsToTransportPosition } from '../../lib/time';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { filterVisibleClips, getVisibleBeatRange } from '../../lib/virtualTimeline';
 import { requestDecision } from '../../lib/decisionService';
+import { useAutomationUiStore } from '../../store/automationUiStore';
+
+const AutomationCurveOverlay = React.lazy(() => import('./AutomationCurveOverlay').then(module => ({ default: module.AutomationCurveOverlay })));
 
 const SNAP_TO_BEAT = 1; // 1 beat
 
-import { TrackHeader, currentDragTrackSourceIndex, setTrackDragSource } from './TrackHeader';
+const TrackHeader = React.lazy(() => import('./TrackHeader').then(module => ({ default: module.TrackHeader })));
 import { ClipItem, currentDragContext, setDragContext } from './ClipItem';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -51,6 +54,7 @@ export function ArrangeView() {
       activeArrangementId: state.activeArrangementId
   })));
   const PIXELS_PER_BEAT = zoom;
+  const activeAutomationLaneByTrack = useAutomationUiStore(state => state.activeLaneByTrack);
   const activeClips = clips.filter(clip => clip.arrangementId === activeArrangementId);
   const [visibleBeatRange, setVisibleBeatRange] = useState({ startBeat: 0, endBeat: 64 });
   const visibleClips = filterVisibleClips(activeClips, visibleBeatRange);
@@ -367,7 +371,9 @@ export function ArrangeView() {
                }
            }}
         >
-          {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} dragTargetIndex={dragTrackDropIndex} setDragTargetIndex={setDragTrackDropIndex} />)}
+          <React.Suspense fallback={null}>
+            {tracks.map((t, index) => <TrackHeader key={t.id} track={t} index={index} onDeletePrompt={((type, id) => setDeleteConfirm({ type, id }))} dragTargetIndex={dragTrackDropIndex} setDragTargetIndex={setDragTrackDropIndex} />)}
+          </React.Suspense>
           
           <Dropdown
                options={[
@@ -695,7 +701,11 @@ export function ArrangeView() {
               </p>
             </div>
           )}
-          {tracks.map(t => (
+          {tracks.map(t => {
+            const activeLaneId = activeAutomationLaneByTrack[t.id];
+            const automationLane = t.automationLanes.find(lane => lane.id === activeLaneId)
+              ?? t.automationLanes.at(-1);
+            return (
             <div 
                 key={t.id}
                 data-testid="track-lane"
@@ -715,6 +725,18 @@ export function ArrangeView() {
                     setContextMenu({ x: e.clientX, y: e.clientY, trackId: t.id, beat });
                 }}
             >
+                {automationLane && (
+                  <React.Suspense fallback={null}>
+                    <AutomationCurveOverlay
+                      trackId={t.id}
+                      trackName={t.name}
+                      lane={automationLane}
+                      pixelsPerBeat={PIXELS_PER_BEAT}
+                      snap={SNAP}
+                      width={totalBeats * PIXELS_PER_BEAT}
+                    />
+                  </React.Suspense>
+                )}
                 {dragSnap?.trackId === t.id && (
                     <div 
                         className="absolute h-20 top-2 rounded-md border-2 border-emerald-500 bg-emerald-500/20 z-40 pointer-events-none transition-all duration-75"
@@ -741,7 +763,8 @@ export function ArrangeView() {
                     />
                 ))}
             </div>
-          ))}
+            );
+          })}
         </div>
         
         {/* Context Menu */}

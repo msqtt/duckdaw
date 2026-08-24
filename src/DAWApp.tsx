@@ -12,6 +12,7 @@ import { ShortcutHelp } from './components/ui/ShortcutHelp';
 import { InputMeter } from './components/DAW/InputMeter';
 import { dawStore, useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
+import { usePluginInspectorStore } from './store/pluginInspectorStore';
 import { MidiCapture, connectMidiInputs } from './lib/midiInput';
 import { MidiInputMeter } from './lib/midiInputMeter';
 import { computeCountIn, type CountInBars } from './lib/countIn';
@@ -30,6 +31,7 @@ import toast, { Toaster } from 'react-hot-toast';
 
 
 const PianoRoll = lazy(() => import('./components/DAW/PianoRoll').then(module => ({ default: module.PianoRoll })));
+const PluginInspector = lazy(() => import('./components/DAW/PluginInspector').then(module => ({ default: module.PluginInspector })));
 const Mixer = lazy(() => import('./components/DAW/Mixer').then(module => ({ default: module.Mixer })));
 const ExportModal = lazy(() => import('./components/DAW/ExportModal').then(module => ({ default: module.ExportModal })));
 export default function DAWApp() {
@@ -57,6 +59,7 @@ export default function DAWApp() {
     isMicRecording: state.isMicRecording,
     tempoTrack: state.tempoTrack,
   })));
+  const pluginInspectorTarget = usePluginInspectorStore(state => state.target);
   const [init, setInit] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const micRecordingStartBeat = useRef(0);
@@ -614,11 +617,16 @@ export default function DAWApp() {
           />
         )}
       </div>
-      <div className="flex flex-col flex-1 overflow-hidden relative">
-        <ArrangeView />
+      <div className="flex flex-1 overflow-hidden relative">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
+          <ArrangeView />
+          <Suspense fallback={null}>
+            {bottomPanel === 'piano-roll' && <PianoRoll />}
+            {bottomPanel === 'mixer' && <Mixer />}
+          </Suspense>
+        </div>
         <Suspense fallback={null}>
-          {bottomPanel === 'piano-roll' && <PianoRoll />}
-          {bottomPanel === 'mixer' && <Mixer />}
+          {pluginInspectorTarget != null && <PluginInspector />}
         </Suspense>
       </div>
       <Suspense fallback={null}>

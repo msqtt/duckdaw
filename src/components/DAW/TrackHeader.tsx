@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { useDAWStore, Track } from '../../store/dawStore';
-import { Volume2, VolumeX, Headphones, Music, Mic, Trash2, Edit2 } from 'lucide-react';
+import { Volume2, VolumeX, Headphones, Music, Mic, Trash2, Edit2, SlidersHorizontal } from 'lucide-react';
+import { createPluginDescriptor, pluginInstrumentToLegacyType } from '../../lib/pluginSdk';
+import { getDefaultPluginRegistry } from '../../lib/pluginRuntime';
+import { usePluginInspectorStore } from '../../store/pluginInspectorStore';
+import { AutomationCreateButton } from './AutomationCreateButton';
 import { useShallow } from 'zustand/react/shallow';
 
+
+const pluginRegistry = getDefaultPluginRegistry();
+const instrumentDefinitions = pluginRegistry.list('instrument');
 export let currentDragTrackSourceIndex: number | null = null;
 export function setTrackDragSource(val: any) { currentDragTrackSourceIndex = val; }
 export function handleTrackDragEnd() { currentDragTrackSourceIndex = null; }
@@ -15,6 +22,7 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
       deleteTrack: state.deleteTrack,
       reorderTrack: state.reorderTrack
   })));
+  const openPluginInspector = usePluginInspectorStore(state => state.open);
   
   const isSelected = selectedTrackId === track.id;
   const [isEditing, setIsEditing] = useState(false);
@@ -125,6 +133,12 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
                 >
                     {track.isMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
                 </button>
+                <AutomationCreateButton
+                  trackId={track.id}
+                  trackName={track.name}
+                  binding={{ target: 'track.mute', label: 'Mute', range: { min: 0, max: 1 }, valueType: 'discrete' }}
+                  currentValue={track.isMuted ? 1 : 0}
+                />
                 <button 
                   className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${track.isSolo ? 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30' : 'bg-neutral-300 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-400 dark:hover:bg-neutral-600'}`}
                   onClick={(e) => { e.stopPropagation(); updateTrack(track.id, { isSolo: !track.isSolo }); }}
@@ -132,7 +146,57 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
                 >
                     <Headphones size={12} />
                 </button>
+                <AutomationCreateButton
+                  trackId={track.id}
+                  trackName={track.name}
+                  binding={{ target: 'track.solo', label: 'Solo', range: { min: 0, max: 1 }, valueType: 'discrete' }}
+                  currentValue={track.isSolo ? 1 : 0}
+                />
             </div>
+
+            {track.type === 'midi' && (
+              <div
+                className="flex min-w-0 flex-1 items-center gap-1"
+                onMouseEnter={() => setCanDrag(false)}
+                onMouseLeave={() => setCanDrag(true)}
+                onTouchStart={() => setCanDrag(false)}
+                onTouchEnd={() => setCanDrag(true)}
+                onClick={event => event.stopPropagation()}
+              >
+                <label className="sr-only" htmlFor={`instrument-${track.id}`}>Instrument for {track.name}</label>
+                <select
+                  id={`instrument-${track.id}`}
+                  aria-label={`Instrument for ${track.name}`}
+                  value={track.instrumentPlugin?.pluginId ?? ''}
+                  onChange={event => {
+                    const definition = pluginRegistry.get(event.target.value);
+                    if (definition?.kind !== 'instrument') return;
+                    const descriptor = createPluginDescriptor(definition, track.instrumentPlugin?.id);
+                    updateTrack(track.id, {
+                      instrumentPlugin: descriptor,
+                      instrument: pluginInstrumentToLegacyType(descriptor.pluginId),
+                    });
+                    openPluginInspector({ ownerType: 'track', ownerId: track.id, kind: 'instrument' });
+                  }}
+                  className="h-6 min-w-0 flex-1 rounded border border-neutral-300 bg-white px-1 text-[10px] dark:border-neutral-700 dark:bg-neutral-800"
+                >
+                  {track.instrumentPlugin != null && pluginRegistry.get(track.instrumentPlugin.pluginId)?.kind !== 'instrument' && (
+                    <option value={track.instrumentPlugin.pluginId}>Unavailable</option>
+                  )}
+                  <option value="" disabled>Instrument</option>
+                  {instrumentDefinitions.map(definition => (
+                    <option key={definition.id} value={definition.id}>{definition.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label={`Open instrument details for ${track.name}`}
+                  disabled={track.instrumentPlugin == null}
+                  onClick={() => openPluginInspector({ ownerType: 'track', ownerId: track.id, kind: 'instrument' })}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-neutral-300 text-neutral-600 hover:bg-emerald-500/20 hover:text-emerald-600 disabled:opacity-40 dark:bg-neutral-700 dark:text-neutral-300"
+                ><SlidersHorizontal size={12} /></button>
+              </div>
+            )}
             
             <div 
                 className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -183,6 +247,12 @@ function TrackHeaderComponent({ track, index, onDeletePrompt, dragTargetIndex, s
                 onClick={e => e.stopPropagation()}
                 onChange={(e) => updateTrack(track.id, { volume: parseFloat(e.target.value) })}
                 className="flex-1 h-1 bg-neutral-200 dark:bg-neutral-700 rounded-full appearance-none cursor-ew-resize accent-emerald-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:rounded-full"
+            />
+            <AutomationCreateButton
+              trackId={track.id}
+              trackName={track.name}
+              binding={{ target: 'volume', label: 'Volume', range: { min: 0, max: 1 }, valueType: 'continuous' }}
+              currentValue={track.volume}
             />
             <span className="text-[10px] text-neutral-400 w-6 text-right tabular-nums">
                 {Math.round(track.volume * 100)}

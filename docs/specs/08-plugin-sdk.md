@@ -1,6 +1,6 @@
 # DuckDAW 浏览器原生 Plugin SDK 规格
 
-> 状态：已实现并验证（2026-08-20）；格式：`.duckdaw` 2.1.0；目标发布：0.4.0。本文定义 DuckDAW 自有插件系统，不兼容也不依赖 VST/AU。
+> 状态：核心与 PLUG-UI-01 交互重构均已实现并验证（2026-08-24）；格式：`.duckdaw` 2.1.0；目标发布：0.4.0。本文定义 DuckDAW 自有插件系统，不兼容也不依赖 VST/AU。
 
 ## 1. 范围与安全边界
 
@@ -82,6 +82,15 @@ Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联
 | `duckdaw.effect.distortion` | Distortion | distortion, wet |
 | `duckdaw.effect.chorus` | Chorus | frequency, delayTime, depth, wet |
 
+
+### PLUG-UI-01：Track 选择、Mixer 链概览与右侧 Inspector
+
+- MIDI Track 的乐器选择器必须位于 ArrangeView 左侧 TrackHeader；Audio Track 不显示乐器选择器。选择新乐器以一次 `updateTrack` 原子替换 descriptor，并可由一次 undo 撤销。
+- 乐器和效果器的完整 number/enum 参数编辑只出现在应用右侧 `Plugin Inspector`；Inspector target 是 session UI state，不写入 `.duckdaw`、不设置 dirty、不开启 undo 事务。关闭 Inspector 不修改插件数据。
+- TrackHeader 提供打开当前 instrument 详情的按钮；Mixer 的 Track/Bus 通道仅显示有序 effect chain 概览、添加、打开详情、enabled、删除、上移和下移，不在通道内展开参数。
+- 每个 Track/Bus 可包含零到多个 effect instances，也允许同一 plugin definition 的多个实例；实例以 descriptor `id` 区分。
+- 调序必须原子替换 `effectPlugins[]`，每次有效上移/下移是一个 undo 事务；首项上移和末项下移禁用且不产生事务。Realtime、offline 与持久化继续按该数组顺序工作。
+- 添加 effect 后自动打开其 Inspector；移除当前 inspected effect 或删除 owner 后 Inspector 显示关闭状态，不得引用失效 descriptor。未知插件保留并显示 `Unavailable: <pluginId>`，不渲染未知参数控件。
 现有 Track `reverb/delay` 保留为 legacy 快捷处理和既有 automation target；它们不冒充通用插件槽。新通用 Track effects 位于 Channel 后、legacy Delay/Reverb 前。Bus effects 使用 `effectPlugins`；2.0 `effects` 只作为迁移/降级镜像。
 
 ### PLUG-FMT-01：2.1.0 持久化与迁移
@@ -140,11 +149,12 @@ Registry 注册发生在音频图创建前。注册失败必须抛出可诊断�
 | PLUG-T04 | 未知 instrument 保留但 runtime fallback synth；未知 effect bypass |
 | PLUG-T05 | realtime audioEngine 与 offline ExportModal 都经同一 registry factory 创建 instrument/effect |
 | PLUG-T06 | 插件替换、轨道删除、Bus 图重建会 dispose；失败创建释放前序实例 |
-| PLUG-T07 | UI 选择 instrument、添加/启停/删除 effect、修改参数写入 Store 并可 undo |
+| PLUG-T07 | TrackHeader 选择 instrument；右侧 Inspector 修改 instrument/effect 参数；Mixer 添加/打开/启停/删除 effect，写入 Store 并可 undo；Mixer 不内联完整参数 |
 | PLUG-T08 | 2.1 package round-trip 保留已知和未知 descriptors；无效 descriptor 原子拒绝 |
 | PLUG-T09 | 五种 instrument、五种 effect 均已注册并能创建/释放实例 |
 | PLUG-T10 | Chromium/Firefox/WebKit 用户路径和 serious/critical axe 通过 |
 | PLUG-T11 | unit、typecheck、build、bundle budgets、diff gates 全通过 |
+| PLUG-T12 | 同一 Track/Bus 添加多个 effect instances；上/下移动保持 descriptor 顺序并以一次 undo/redo 恢复；realtime/offline/package 顺序一致 |
 
 
 ### 5.1 交付证据（2026-08-20）
@@ -153,9 +163,9 @@ Registry 注册发生在音频图创建前。注册失败必须抛出可诊断�
 - `pluginRuntime.test.ts`：共享 factory、unknown/kind mismatch、Instrument factory 抛错回退 synth、fallback 失败静音、Effect factory 抛错 bypass 且后续链继续。
 - `audioEnginePlugin.test.ts`：可注入 registry 的真实 `syncTracks`/`syncRouting`、替换/删除/Bus rebuild dispose、MIDI `Tone.Part` 调度到 plugin `triggerAttackRelease`、5+5 factory 创建/触发/幂等释放。
 - `pluginPersistence.test.ts` 与 `projectStorage.test.ts`：2.1 migration/round-trip、unknown descriptor 保留、无效嵌套参数与 Audio Track instrument 原子拒绝。
-- `PLUG-E2E-01`：Mixer 乐器选择、Track effect 添加和参数编辑、undo/redo；Chromium/Firefox/WebKit 均通过。首轮 Chromium 实测发现并修复 `PolySynth(PluckSynth)` 不合法的浏览器崩溃。
-- 质量门禁：完整 unit、TypeScript no-emit、production build、bundle size、三浏览器 E2E、`git diff --check`、high-level audit 均通过；DAWApp 395.88/400 KiB，`duckdaw-plugins` 9.85/40 KiB。
-- 独立审查：首次发现第三方 factory 抛错降级缺口；补充失败路径实现和测试后复审结论为 **PASS，无 P0/P1**。
+- `PLUG-E2E-01`：TrackHeader 选择乐器、右侧 Inspector 参数、Mixer Track 多 Effect 添加/打开/调序及 undo/redo；Chromium/Firefox/WebKit 均通过。
+- 质量门禁：完整 unit、TypeScript no-emit、production build、bundle size、三浏览器 E2E 与 `git diff --check` 均通过；DAWApp 393.26/400 KiB，`duckdaw-plugins` 9.85/40 KiB；全矩阵与 AUTO-02 合计 Vitest 316/316、Playwright 24/24。
+- 独立审查：核心 SDK 首次复审发现第三方 factory 抛错降级缺口并修复；本轮再次逐项核查 TrackHeader→Inspector、Mixer ordered chain、Automation UI→Store→AudioEngine/Export 与 dispose 调用链，结论为 **PASS，无 P0/P1**。
 ## 6. 非目标与后续扩展
 
-本批不承诺运行时安装市场、签名包、AudioWorklet 沙箱、任意采样器资源包、插件参数 automation 或跨进程崩溃隔离。这些能力必须另立规格；不能从本 SDK 类型存在推断为已实现。
+本批不承诺运行时安装市场、签名包、AudioWorklet 沙箱、任意采样器资源包或跨进程崩溃隔离。插件参数 Automation 已转由 [`09-automation.md`](./09-automation.md) 的 AUTO-02 冻结；其完成状态不得仅由 Plugin SDK 类型存在推断。

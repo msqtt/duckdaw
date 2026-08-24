@@ -4,7 +4,7 @@ import { temporal } from 'zundo';
 import { createDefaultAudioEdit, setClipFadeValue, setClipGainValue, splitClip, toggleClipReverseValue, trimClipEndValue, trimClipStartValue } from '../lib/audioEditing';
 import { transformNotes } from '../lib/midiEditing';
 import { type TempoPoint, validateTempoMap, createDefaultTempoMap } from '../lib/tempoMap';
-import { type AutomationPoint, type AutomationLane, type AutomationTarget, type AutomationCurve, normalizeAutomationLane } from '../lib/automation';
+import { type AutomationPoint, type AutomationLane, type AutomationTarget, type AutomationCurve, type AutomationBinding, normalizeAutomationLane } from '../lib/automation';
 import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from '../lib/routingGraph';
 
 import {
@@ -227,6 +227,7 @@ export interface DAWState extends PersistedProjectState {
 
   // Batch E: Automation
   addAutomationLane: (trackId: string, target: AutomationTarget) => void;
+  ensureAutomationLane: (trackId: string, binding: AutomationBinding, currentValue: number) => string | undefined;
   deleteAutomationLane: (trackId: string, laneId: string) => void;
   toggleAutomationLane: (trackId: string, laneId: string) => void;
   addAutomationPoint: (trackId: string, laneId: string, point: Omit<AutomationPoint, 'id'>) => void;
@@ -1049,6 +1050,11 @@ export const dawStore = createStore<DAWState>()(
           enabled: true,
           points: [],
         };
+        try {
+          normalizeAutomationLane(newLane);
+        } catch {
+          return state;
+        }
         return {
           tracks: state.tracks.map(t => t.id === trackId
             ? { ...t, automationLanes: [...t.automationLanes, newLane] }
@@ -1056,6 +1062,41 @@ export const dawStore = createStore<DAWState>()(
           isDirty: true,
         };
       }),
+
+      ensureAutomationLane: (trackId, binding, currentValue) => {
+        let laneId: string | undefined;
+        set((state) => {
+          const track = state.tracks.find(candidate => candidate.id === trackId);
+          if (!track) return state;
+          const existing = track.automationLanes.find(lane => lane.target === binding.target);
+          if (existing) {
+            laneId = existing.id;
+            return state;
+          }
+          try {
+            const newLane = normalizeAutomationLane({
+              id: generateId(),
+              target: binding.target,
+              label: binding.label,
+              range: { ...binding.range },
+              valueType: binding.valueType,
+              ...(binding.values == null ? {} : { values: [...binding.values] }),
+              enabled: true,
+              points: [{ id: generateId(), beat: 0, value: currentValue, curve: 'step' }],
+            });
+            laneId = newLane.id;
+            return {
+              tracks: state.tracks.map(candidate => candidate.id === trackId
+                ? { ...candidate, automationLanes: [...candidate.automationLanes, newLane] }
+                : candidate),
+              isDirty: true,
+            };
+          } catch {
+            return state;
+          }
+        });
+        return laneId;
+      },
 
       deleteAutomationLane: (trackId, laneId) => set((state) => ({
         tracks: state.tracks.map(t => t.id === trackId

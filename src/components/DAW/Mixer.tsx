@@ -1,118 +1,110 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDAWStore, Track } from '../../store/dawStore';
-import { Volume2, VolumeX } from 'lucide-react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { engine } from '../../lib/audioEngine';
 import { useShallow } from 'zustand/react/shallow';
-import {
-  createPluginDescriptor,
-  pluginInstrumentToLegacyType,
-  type PluginInstanceDescriptor,
-  type PluginParameterDefinition,
-} from '../../lib/pluginSdk';
+import { createPluginDescriptor, type PluginInstanceDescriptor } from '../../lib/pluginSdk';
 import { getDefaultPluginRegistry } from '../../lib/pluginRuntime';
+import { movePluginInChain } from '../../lib/pluginUi';
+import { usePluginInspectorStore } from '../../store/pluginInspectorStore';
+import { AutomationCreateButton } from './AutomationCreateButton';
 
 const pluginRegistry = getDefaultPluginRegistry();
-const instrumentDefinitions = pluginRegistry.list('instrument');
 const effectDefinitions = pluginRegistry.list('effect');
 
-function PluginParameterControl({
-  plugin,
-  parameter,
-  onChange,
-}: {
-  plugin: PluginInstanceDescriptor;
-  parameter: PluginParameterDefinition;
-  onChange: (value: number | string) => void;
-  key?: React.Key;
-}) {
-  const value = plugin.parameters[parameter.id] ?? parameter.defaultValue;
-  if (parameter.type === 'enum') {
-    return (
-      <label className="flex items-center justify-between gap-1 text-[8px]">
-        <span>{parameter.name}</span>
-        <select
-          aria-label={`${parameter.name} for ${plugin.pluginId}`}
-          value={String(value)}
-          onChange={event => onChange(event.target.value)}
-          className="h-4 max-w-16 rounded bg-white dark:bg-neutral-800"
-        >
-          {parameter.values.map(option => <option key={option} value={option}>{option}</option>)}
-        </select>
-      </label>
-    );
-  }
-  return (
-    <label className="flex items-center justify-between gap-1 text-[8px]">
-      <span className="truncate" title={parameter.name}>{parameter.name}</span>
-      <input
-        type="range"
-        min={parameter.min}
-        max={parameter.max}
-        step={parameter.step}
-        value={typeof value === 'number' ? value : parameter.defaultValue}
-        aria-label={`${parameter.name} for ${plugin.pluginId}`}
-        onChange={event => onChange(Number(event.target.value))}
-        className="w-12"
-      />
-    </label>
-  );
-}
-
 function PluginChainEditor({
+  ownerType,
   ownerId,
   ownerName,
   plugins,
   onChange,
 }: {
+  ownerType: 'track' | 'bus';
   ownerId: string;
   ownerName: string;
   plugins: PluginInstanceDescriptor[];
   onChange: (plugins: PluginInstanceDescriptor[]) => void;
 }) {
+  const inspectorTarget = usePluginInspectorStore(state => state.target);
+  const openInspector = usePluginInspectorStore(state => state.open);
+  const closeInspector = usePluginInspectorStore(state => state.close);
+  const controlId = `add-effect-${ownerType}-${ownerId}`;
+
   return (
-    <div className="w-full space-y-1 rounded bg-black/5 dark:bg-black/20 p-1">
-      <label className="sr-only" htmlFor={`add-effect-${ownerId}`}>Add effect to {ownerName}</label>
+    <div className="w-full space-y-1 rounded bg-black/5 dark:bg-black/20 p-1" data-testid="plugin-chain">
+      <label className="sr-only" htmlFor={controlId}>Add effect to {ownerName}</label>
       <select
-        id={`add-effect-${ownerId}`}
+        id={controlId}
+        aria-label={`Add effect to ${ownerName}`}
         value=""
         onChange={event => {
           const definition = pluginRegistry.get(event.target.value);
-          if (definition?.kind === 'effect') onChange([...plugins, createPluginDescriptor(definition)]);
+          if (definition?.kind !== 'effect') return;
+          const descriptor = createPluginDescriptor(definition);
+          onChange([...plugins, descriptor]);
+          openInspector({ ownerType, ownerId, kind: 'effect', pluginInstanceId: descriptor.id });
         }}
-        className="h-5 w-full rounded bg-white dark:bg-neutral-800 text-[9px]"
+        className="h-6 w-full rounded bg-white dark:bg-neutral-800 text-[9px]"
       >
         <option value="">+ Effect</option>
         {effectDefinitions.map(definition => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
       </select>
-      {plugins.map(plugin => {
+      {plugins.map((plugin, index) => {
         const definition = pluginRegistry.get(plugin.pluginId);
         const available = definition?.kind === 'effect';
+        const label = available ? definition.name : `Unavailable: ${plugin.pluginId}`;
         return (
-          <div key={plugin.id} className="rounded border border-neutral-300 dark:border-neutral-700 p-1">
-            <div className="flex items-center justify-between gap-1 text-[8px]">
-              <button
-                type="button"
-                aria-pressed={plugin.enabled}
-                aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.pluginId} on ${ownerName}`}
-                onClick={() => onChange(plugins.map(item => item.id === plugin.id ? { ...item, enabled: !item.enabled } : item))}
-                className={plugin.enabled ? 'text-emerald-600' : 'text-neutral-500'}
-              >{available ? definition.name : `Unavailable: ${plugin.pluginId}`}</button>
-              <button
-                type="button"
-                aria-label={`Remove ${plugin.pluginId} from ${ownerName}`}
-                onClick={() => onChange(plugins.filter(item => item.id !== plugin.id))}
-              >×</button>
-            </div>
-            {available && definition.parameters.map(parameter => (
-              <PluginParameterControl
-                key={parameter.id}
-                plugin={plugin}
-                parameter={parameter}
-                onChange={value => onChange(plugins.map(item => item.id === plugin.id
-                  ? { ...item, parameters: { ...item.parameters, [parameter.id]: value } }
-                  : item))}
-              />
-            ))}
+          <div
+            key={plugin.id}
+            data-testid="plugin-chain-item"
+            data-plugin-id={plugin.pluginId}
+            data-plugin-instance-id={plugin.id}
+            className="flex items-center gap-0.5 rounded border border-neutral-300 bg-white/50 p-0.5 text-[8px] dark:border-neutral-700 dark:bg-neutral-900/50"
+          >
+            <button
+              type="button"
+              aria-label={`Open ${label} details on ${ownerName}`}
+              onClick={() => openInspector({ ownerType, ownerId, kind: 'effect', pluginInstanceId: plugin.id })}
+              className={`min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left ${plugin.enabled ? 'text-emerald-600' : 'text-neutral-500'}`}
+              title={label}
+            >{index + 1}. {label}</button>
+            <button
+              type="button"
+              aria-pressed={plugin.enabled}
+              aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.pluginId} on ${ownerName}`}
+              onClick={() => onChange(plugins.map(item => item.id === plugin.id ? { ...item, enabled: !item.enabled } : item))}
+              className="rounded px-1 font-bold"
+            >{plugin.enabled ? '●' : '○'}</button>
+            <button
+              type="button"
+              aria-label={`Move ${label} up on ${ownerName}`}
+              disabled={index === 0}
+              onClick={() => {
+                const moved = movePluginInChain(plugins, plugin.id, 'up');
+                if (moved !== plugins) onChange([...moved]);
+              }}
+              className="rounded p-0.5 disabled:opacity-25"
+            ><ChevronUp size={11} /></button>
+            <button
+              type="button"
+              aria-label={`Move ${label} down on ${ownerName}`}
+              disabled={index === plugins.length - 1}
+              onClick={() => {
+                const moved = movePluginInChain(plugins, plugin.id, 'down');
+                if (moved !== plugins) onChange([...moved]);
+              }}
+              className="rounded p-0.5 disabled:opacity-25"
+            ><ChevronDown size={11} /></button>
+            <button
+              type="button"
+              aria-label={`Remove ${plugin.pluginId} from ${ownerName}`}
+              onClick={() => {
+                onChange(plugins.filter(item => item.id !== plugin.id));
+                if (inspectorTarget?.kind === 'effect' && inspectorTarget.ownerType === ownerType
+                  && inspectorTarget.ownerId === ownerId && inspectorTarget.pluginInstanceId === plugin.id) closeInspector();
+              }}
+              className="rounded p-0.5 text-neutral-500 hover:text-red-500"
+            ><X size={11} /></button>
           </div>
         );
       })}
@@ -143,56 +135,15 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   }, [track.id]);
 
   return (
-    <div className="w-32 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
+    <div data-testid="mixer-channel" data-track-id={track.id} className="w-32 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
       <div className="text-xs font-bold truncate w-full px-2 text-center text-neutral-600 dark:text-neutral-300 pointer-events-none mb-2">
         {track.name}
       </div>
       
-      {track.type === 'midi' && (
-        <div className="w-full space-y-1 px-2 mb-2">
-          <label className="sr-only" htmlFor={`instrument-${track.id}`}>Instrument for {track.name}</label>
-          <select
-            id={`instrument-${track.id}`}
-            value={track.instrumentPlugin?.pluginId ?? ''}
-            onChange={event => {
-              const definition = pluginRegistry.get(event.target.value);
-              if (definition?.kind !== 'instrument') return;
-              const descriptor = createPluginDescriptor(definition, track.instrumentPlugin?.id);
-              updateTrack(track.id, {
-                instrumentPlugin: descriptor,
-                instrument: pluginInstrumentToLegacyType(descriptor.pluginId),
-              });
-            }}
-            className="h-5 w-full rounded bg-white dark:bg-neutral-800 text-[9px]"
-          >
-            {track.instrumentPlugin != null && pluginRegistry.get(track.instrumentPlugin.pluginId)?.kind !== 'instrument' && (
-              <option value={track.instrumentPlugin.pluginId}>Unavailable: {track.instrumentPlugin.pluginId}</option>
-            )}
-            <option value="" disabled>Select instrument</option>
-            {instrumentDefinitions.map(definition => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
-          </select>
-          {track.instrumentPlugin != null && (() => {
-            const definition = pluginRegistry.get(track.instrumentPlugin.pluginId);
-            if (definition?.kind !== 'instrument') return null;
-            return definition.parameters.map(parameter => (
-              <PluginParameterControl
-                key={parameter.id}
-                plugin={track.instrumentPlugin!}
-                parameter={parameter}
-                onChange={value => updateTrack(track.id, {
-                  instrumentPlugin: {
-                    ...track.instrumentPlugin!,
-                    parameters: { ...track.instrumentPlugin!.parameters, [parameter.id]: value },
-                  },
-                })}
-              />
-            ));
-          })()}
-        </div>
-      )}
       <div className="w-full px-2 mb-2">
         <PluginChainEditor
-          ownerId={`track-${track.id}`}
+          ownerType="track"
+          ownerId={track.id}
           ownerName={track.name}
           plugins={track.effectPlugins ?? []}
           onChange={effectPlugins => updateTrack(track.id, { effectPlugins })}
@@ -207,6 +158,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
         >
           M
         </button>
+        <AutomationCreateButton trackId={track.id} trackName={track.name} binding={{ target: 'track.mute', label: 'Mute', range: { min: 0, max: 1 }, valueType: 'discrete' }} currentValue={track.isMuted ? 1 : 0} />
         <button 
           aria-label={`Solo ${track.name}`}
           aria-pressed={track.isSolo}
@@ -215,6 +167,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
         >
           S
         </button>
+        <AutomationCreateButton trackId={track.id} trackName={track.name} binding={{ target: 'track.solo', label: 'Solo', range: { min: 0, max: 1 }, valueType: 'discrete' }} currentValue={track.isSolo ? 1 : 0} />
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-end w-full relative group px-2 gap-2">
@@ -222,25 +175,19 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
           {/* FX Sends */}
           <div className="flex justify-between items-center text-[9px] text-emerald-600 border-none">
              <span>REV</span>
+             <AutomationCreateButton trackId={track.id} trackName={track.name} binding={{ target: 'reverb', label: 'Reverb', range: { min: 0, max: 1 }, valueType: 'continuous' }} currentValue={track.reverb || 0} />
              <input type="range" min="0" max="1" step="0.05" value={track.reverb || 0} aria-label={`Reverb send ${track.name}`} aria-valuetext={`${Math.round((track.reverb || 0) * 100)}%`} onChange={(e) => updateTrack(track.id, { reverb: parseFloat(e.target.value) })} className="w-12 h-1 accent-emerald-500 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-emerald-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" />
           </div>
           <div className="flex justify-between items-center text-[9px] text-blue-500 mb-2 border-none">
              <span>DLY</span>
+             <AutomationCreateButton trackId={track.id} trackName={track.name} binding={{ target: 'delay', label: 'Delay', range: { min: 0, max: 1 }, valueType: 'continuous' }} currentValue={track.delay || 0} />
              <input type="range" min="0" max="1" step="0.05" value={track.delay || 0} aria-label={`Delay send ${track.name}`} aria-valuetext={`${Math.round((track.delay || 0) * 100)}%`} onChange={(e) => updateTrack(track.id, { delay: parseFloat(e.target.value) })} className="w-12 h-1 accent-blue-500 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-blue-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" />
           </div>
           
-          {/* Synth Env */}
-          {track.type === 'midi' && track.env && (
-             <div className="grid grid-cols-2 gap-x-1 gap-y-1 bg-black/10 dark:bg-black/30 p-1 rounded border-none">
-                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">A</span><input type="range" min="0.001" max="2" step="0.01" value={track.env.attack} aria-label={`Attack ${track.name}`} aria-valuetext={`${track.env.attack.toFixed(2)} seconds`} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, attack: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
-                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">D</span><input type="range" min="0.01" max="2" step="0.01" value={track.env.decay} aria-label={`Decay ${track.name}`} aria-valuetext={`${track.env.decay.toFixed(2)} seconds`} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, decay: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
-                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">S</span><input type="range" min="0" max="1" step="0.01" value={track.env.sustain} aria-label={`Sustain ${track.name}`} aria-valuetext={`${Math.round(track.env.sustain * 100)}%`} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, sustain: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
-                <div className="flex flex-col items-center border-none"><span className="text-[8px] text-neutral-500">R</span><input type="range" min="0.01" max="5" step="0.01" value={track.env.release} aria-label={`Release ${track.name}`} aria-valuetext={`${track.env.release.toFixed(2)} seconds`} onChange={(e) => updateTrack(track.id, { env: { ...track.env!, release: parseFloat(e.target.value) }})} className="w-full h-1 accent-neutral-400 bg-neutral-200 dark:bg-neutral-700 rounded appearance-none cursor-ew-resize [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:bg-neutral-500 dark:[&::-webkit-slider-thumb]:bg-neutral-300 [&::-webkit-slider-thumb]:rounded-full [&::-moz-range-thumb]:h-2 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:bg-neutral-500 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full" /></div>
-             </div>
-          )}
         </div>
         
         <div className="flex-1 flex justify-center w-full relative min-h-[100px]">
+            <AutomationCreateButton className="absolute left-0 top-0 z-10" trackId={track.id} trackName={track.name} binding={{ target: 'volume', label: 'Volume', range: { min: 0, max: 1 }, valueType: 'continuous' }} currentValue={track.volume} />
             {/* Meter */}
             <div className="w-1.5 h-full bg-neutral-300 dark:bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
                <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
@@ -261,6 +208,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
 
       <div className="mt-4 flex flex-col items-center w-full px-2">
          <span className="text-[10px] text-neutral-500 font-mono mb-1">PAN</span>
+         <AutomationCreateButton trackId={track.id} trackName={track.name} binding={{ target: 'pan', label: 'Pan', range: { min: -1, max: 1 }, valueType: 'continuous' }} currentValue={track.pan} />
          <input 
             type="range" 
             min="-1" max="1" step="0.01" 
@@ -436,7 +384,8 @@ function RoutingControls() {
               <input type="range" min="-1" max="1" step="0.01" value={bus.pan} aria-label={`Bus pan ${bus.name}`} onChange={event => updateBus(bus.id, { pan: Number(event.target.value) })} className="w-12" />
               <button type="button" aria-label={`Mute ${bus.name}`} aria-pressed={bus.isMuted} onClick={() => updateBus(bus.id, { isMuted: !bus.isMuted })} className={bus.isMuted ? 'text-orange-500' : ''}>M</button>
               <PluginChainEditor
-                ownerId={`bus-${bus.id}`}
+                ownerType="bus"
+                ownerId={bus.id}
                 ownerName={bus.name}
                 plugins={bus.effectPlugins ?? []}
                 onChange={effectPlugins => updateBus(bus.id, { effectPlugins })}
