@@ -54,15 +54,17 @@ vi.mock('tone', () => {
     Destination: { connect: vi.fn(), volume: new Param() },
     Transport: {
       bpm: { value: 120, cancelScheduledValues() {}, setValueAtTime() {}, linearRampTo() {} },
-      timeSignature: [4, 4], position: '0:0:0', loop: false,
+      timeSignature: [4, 4], position: '0:0:0', state: 'stopped', ticks: 0, loop: false,
       schedule: vi.fn(() => 1), scheduleOnce: vi.fn(() => 2), clear: vi.fn(),
       start: vi.fn(), stop: vi.fn(), pause: vi.fn(),
     },
     context: { state: 'running', resume: vi.fn(), createMediaStreamDestination: () => ({ stream: {} }) },
     start: vi.fn(),
+    now: vi.fn(() => 0),
   };
 });
 
+import * as Tone from 'tone';
 import { AudioEngine } from './audioEngine';
 import { PluginRegistry, type EffectPluginInstance, type InstrumentPluginInstance } from './pluginSdk';
 import { createBuiltInPluginRegistry } from './builtinPlugins';
@@ -129,9 +131,39 @@ describe('AudioEngine plugin call chain', () => {
     expect(instruments[0].dispose).toHaveBeenCalledOnce();
     expect(effects[0].dispose).toHaveBeenCalledOnce();
 
+    // PLUG-T13: the existing Part must resolve the replacement at event time.
+    part.callback(1, part.events[0]);
+    expect(instruments[0].triggerAttackRelease).toHaveBeenCalledTimes(1);
+    expect(instruments[1].triggerAttackRelease).toHaveBeenCalledWith('C4', '0:1', 1, 0.75);
+
     audio.syncTracks([]);
+    part.callback(2, part.events[0]);
+    expect(instruments[1].triggerAttackRelease).toHaveBeenCalledTimes(1);
     expect(instruments[1].dispose).toHaveBeenCalledOnce();
     expect(effects[1].dispose).toHaveBeenCalledOnce();
+  });
+
+  it('releases active instrument voices on Stop while keeping idle Stop a no-op', () => {
+    const releaseAll = vi.fn();
+    const registry = new PluginRegistry();
+    registry.registerBuiltIn({
+      id: 'duckdaw.instrument.synth', version: '1.0.0', kind: 'instrument', name: 'Synth', description: 'test', parameters: [],
+      create: () => ({ node: node() as any, triggerAttackRelease: vi.fn(), releaseAll, setParameters: vi.fn(), dispose: vi.fn() }),
+    });
+    const audio = new AudioEngine(registry);
+    audio.syncTracks([{
+      id: 'track', name: 'Track', type: 'midi', volume: 1, pan: 0, isMuted: false, isSolo: false,
+      color: '#fff', reverb: 0, delay: 0, instrument: 'synth', automationLanes: [],
+    }]);
+
+    Object.assign(Tone.Transport, { state: 'started', ticks: 24, position: '0:0:1' });
+    expect(audio.stop()).toBe(true);
+    expect(releaseAll).toHaveBeenCalledWith(0);
+
+    releaseAll.mockClear();
+    Object.assign(Tone.Transport, { state: 'stopped', ticks: 0, position: '0:0:0' });
+    expect(audio.stop()).toBe(false);
+    expect(releaseAll).not.toHaveBeenCalled();
   });
 
   it('uses the same effect factory for bus chains and bypasses missing plugins', () => {

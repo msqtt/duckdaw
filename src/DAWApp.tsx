@@ -12,6 +12,8 @@ import { ShortcutHelp } from './components/ui/ShortcutHelp';
 import { InputMeter } from './components/DAW/InputMeter';
 import { dawStore, useDAWStore } from './store/dawStore';
 import { engine } from './lib/audioEngine';
+import { transportController } from './lib/transportCommands';
+import { registerProjectReplacementPreparation } from './lib/projectReplacementRuntime';
 import { usePluginInspectorStore } from './store/pluginInspectorStore';
 import { MidiCapture, connectMidiInputs } from './lib/midiInput';
 import { MidiInputMeter } from './lib/midiInputMeter';
@@ -36,14 +38,12 @@ const PluginInspector = lazy(() => import('./components/DAW/PluginInspector').th
 const Mixer = lazy(() => import('./components/DAW/Mixer').then(module => ({ default: module.Mixer })));
 const ExportModal = lazy(() => import('./components/DAW/ExportModal').then(module => ({ default: module.ExportModal })));
 export default function DAWApp() {
-  const { tracks, clips, buses, sends, activeArrangementId, togglePlay, stop, bottomPanel, exportModalOpen, bpm, timeSignature, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isRecording, isMicRecording, tempoTrack } = useDAWStore(useShallow(state => ({
+  const { tracks, clips, buses, sends, activeArrangementId, bottomPanel, exportModalOpen, bpm, timeSignature, isLooping, metronomeOn, metronomeSound, metronomeVolume, metronomeSubdivisions, masterVolume, loopStart, loopEnd, isRecording, isMicRecording, tempoTrack } = useDAWStore(useShallow(state => ({
     tracks: state.tracks,
     clips: state.clips,
     buses: state.buses,
     sends: state.sends,
     activeArrangementId: state.activeArrangementId,
-    togglePlay: state.togglePlay,
-    stop: state.stop,
     bottomPanel: state.bottomPanel,
     exportModalOpen: state.exportModalOpen,
     bpm: state.bpm,
@@ -67,10 +67,13 @@ export default function DAWApp() {
   const micRecordingTrackId = useRef<string | null>(null);
   const micRecordingOperation = useRef(0);
   const midiCapture = useRef(new MidiCapture());
+  const micRecorderOwner = useRef<number | null>(null);
   const midiDisconnect = useRef<(() => void) | null>(null);
   const midiRecordingTrackId = useRef<string | null>(null);
   const midiRecordingStartBeat = useRef(0);
   const midiMeter = useRef(new MidiInputMeter());
+  const midiRecordingOperation = useRef(0);
+  const projectReplacementGeneration = useRef(0);
 
   // Count-in state
   const [countInBars, setCountInBars] = useState<CountInBars>(() => {
@@ -80,6 +83,34 @@ export default function DAWApp() {
   const [countingIn, setCountingIn] = useState(false);
   const [countInRemaining, setCountInRemaining] = useState(0);
 
+
+  useEffect(() => {
+    registerProjectReplacementPreparation(async () => {
+      projectReplacementGeneration.current += 1;
+      midiRecordingOperation.current += 1;
+      micRecordingOperation.current += 1;
+      midiDisconnect.current?.();
+      midiDisconnect.current = null;
+      midiCapture.current.stop();
+      midiRecordingTrackId.current = null;
+
+      const discardedRecording = await engine.micRecorder.stop();
+      if (discardedRecording) URL.revokeObjectURL(discardedRecording.url);
+      micRecorderOwner.current = null;
+      micRecordingTrackId.current = null;
+
+      engine.stop();
+      useDAWStore.getState().stop();
+      setCountingIn(false);
+      setCountInRemaining(0);
+    });
+    return () => {
+      registerProjectReplacementPreparation(async () => {
+        engine.stop();
+        useDAWStore.getState().stop();
+      });
+    };
+  }, []);
   // Input meter state
   const [midiLevel, setMidiLevel] = useState(0);
   const [midiPeak, setMidiPeak] = useState(0);
@@ -119,21 +150,10 @@ export default function DAWApp() {
 
       if (e.code === 'Space') {
         e.preventDefault();
-        
-        if (Tone.context.state !== 'running') {
-            await engine.initialize();
-            setInit(true);
-        }
-        
-        if (state.isPlaying) {
-          engine.pause();
-        } else {
-          engine.play();
-        }
-        togglePlay();
+        await transportController.togglePlayback();
+        setInit(true);
       } else if (e.code === 'Enter') {
-         engine.stop();
-         stop();
+         transportController.stopPlayback();
       } else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.altKey && state.bottomPanel !== 'piano-roll') {
          e.preventDefault();
          const playheadBeat = Tone.Transport.ticks / Tone.Transport.PPQ;
@@ -356,6 +376,8 @@ export default function DAWApp() {
   }, [isLooping, loopStart, loopEnd]);
 
   useEffect(() => {
+    const operation = ++midiRecordingOperation.current;
+    const projectGeneration = projectReplacementGeneration.current;
     const handleMidiRecording = async () => {
       const state = useDAWStore.getState();
       if (state.isRecording) {
@@ -365,6 +387,19 @@ export default function DAWApp() {
           state.toggleRecording();
           return;
         }
+
+        const transportPositionBeforeCountIn = Tone.Transport.position;
+        const transportStatusBeforeCountIn = state.transportStatus;
+        let startedPlaybackForCountIn = false;
+        const rollbackCountInPlayback = () => {
+          if (projectGeneration !== projectReplacementGeneration.current) return;
+          if (!startedPlaybackForCountIn) return;
+          if (transportStatusBeforeCountIn === 'paused') Tone.Transport.pause();
+          else Tone.Transport.stop();
+          Tone.Transport.position = transportPositionBeforeCountIn;
+          useDAWStore.getState().setTransportStatus(transportStatusBeforeCountIn);
+          startedPlaybackForCountIn = false;
+        };
 
         // Compute count-in
         const playheadBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
@@ -379,28 +414,33 @@ export default function DAWApp() {
           setCountInRemaining(countIn.countInBeats);
 
           // Start playback for count-in
-          if (!state.isPlaying) {
-            engine.play();
-            state.togglePlay();
+          if (useDAWStore.getState().transportStatus !== 'playing') {
+            await transportController.togglePlayback();
+            startedPlaybackForCountIn = true;
           }
 
           // Wait for count-in duration
           const countInSeconds = (countIn.countInBeats / state.bpm) * 60;
           await new Promise<void>((resolve) => {
-            let elapsed = 0;
-            const interval = setInterval(() => {
-              elapsed += 0.1;
-              const remaining = Math.max(0, countIn.countInBeats - (elapsed / 60 * state.bpm));
+            const startedAt = performance.now();
+            const interval = window.setInterval(() => {
+              const elapsedSeconds = (performance.now() - startedAt) / 1000;
+              const remaining = Math.max(0, countIn.countInBeats - (elapsedSeconds / 60 * state.bpm));
               setCountInRemaining(Math.ceil(remaining));
-              if (elapsed >= countInSeconds) {
-                clearInterval(interval);
+              if (elapsedSeconds >= countInSeconds
+                || operation !== midiRecordingOperation.current
+                || !useDAWStore.getState().isRecording) {
+                window.clearInterval(interval);
                 resolve();
               }
             }, 100);
           });
           setCountingIn(false);
           setCountInRemaining(0);
-          if (!useDAWStore.getState().isRecording) return;
+          if (operation !== midiRecordingOperation.current || !useDAWStore.getState().isRecording) {
+            rollbackCountInPlayback();
+            return;
+          }
         }
 
         const startBeat = transportPositionToBeats(Tone.Transport.position.toString(), state.timeSignature);
@@ -410,7 +450,8 @@ export default function DAWApp() {
 
         const selectedDeviceId = localStorage.getItem('duckdaw_midi_device') || undefined;
         try {
-          midiDisconnect.current = await connectMidiInputs(data => {
+          const disconnect = await connectMidiInputs(data => {
+            if (operation !== midiRecordingOperation.current || !useDAWStore.getState().isRecording) return;
             const current = useDAWStore.getState();
             const beat = transportPositionToBeats(Tone.Transport.position.toString(), current.timeSignature);
             midiCapture.current.handleMessage(data, beat);
@@ -419,15 +460,27 @@ export default function DAWApp() {
             if (status === 0x90 && data[2] > 0) {
               midiMeter.current.feed(data[2]);
             }
-          }, selectedDeviceId);
-          if (!state.isPlaying) {
-            engine.play();
-            state.togglePlay();
+          }, selectedDeviceId, () => operation === midiRecordingOperation.current
+            && projectGeneration === projectReplacementGeneration.current
+            && useDAWStore.getState().isRecording);
+          if (operation !== midiRecordingOperation.current || !useDAWStore.getState().isRecording) {
+            disconnect();
+            rollbackCountInPlayback();
+            return;
+          }
+          midiDisconnect.current = disconnect;
+          if (useDAWStore.getState().transportStatus !== 'playing') {
+            await transportController.togglePlayback();
           }
         } catch (error) {
+          if (operation !== midiRecordingOperation.current
+            || projectGeneration !== projectReplacementGeneration.current) return;
           midiRecordingTrackId.current = null;
+          rollbackCountInPlayback();
           toast.error(`MIDI recording unavailable: ${error instanceof Error ? error.message : String(error)}`);
-          state.toggleRecording();
+          if (useDAWStore.getState().isRecording) {
+            useDAWStore.getState().toggleRecording();
+          }
         }
       } else if (midiDisconnect.current) {
         midiDisconnect.current();
@@ -464,6 +517,7 @@ export default function DAWApp() {
 
   useEffect(() => {
     const operation = ++micRecordingOperation.current;
+    const projectGeneration = projectReplacementGeneration.current;
     const handleMicState = async () => {
       const state = useDAWStore.getState();
 
@@ -475,13 +529,15 @@ export default function DAWApp() {
           return;
         }
           const transportPositionBeforeCountIn = Tone.Transport.position;
+          const transportStatusBeforeCountIn = state.transportStatus;
           let startedPlaybackForCountIn = false;
           const rollbackCountInPlayback = () => {
+            if (projectGeneration !== projectReplacementGeneration.current) return;
             if (!startedPlaybackForCountIn) return;
-            engine.pause();
+            if (transportStatusBeforeCountIn === 'paused') Tone.Transport.pause();
+            else Tone.Transport.stop();
             Tone.Transport.position = transportPositionBeforeCountIn;
-            const current = useDAWStore.getState();
-            if (current.isPlaying) current.togglePlay();
+            useDAWStore.getState().setTransportStatus(transportStatusBeforeCountIn);
             startedPlaybackForCountIn = false;
           };
           const countIn = computeCountIn({
@@ -493,9 +549,8 @@ export default function DAWApp() {
           if (countIn.countInBeats > 0) {
             setCountingIn(true);
             setCountInRemaining(countIn.countInBeats);
-            if (!state.isPlaying) {
-              engine.play();
-              state.togglePlay();
+            if (useDAWStore.getState().transportStatus !== 'playing') {
+              await transportController.togglePlayback();
               startedPlaybackForCountIn = true;
             }
             const countInSeconds = countIn.countInBeats * 60 / state.bpm;
@@ -524,42 +579,61 @@ export default function DAWApp() {
         try {
           const selectedDeviceId = localStorage.getItem('duckdaw_audio_device') || undefined;
           const startBeat = await startAudioRecordingWithPlayback({
-            startCapture: () => engine.micRecorder.start(selectedDeviceId),
+            startCapture: async () => {
+              micRecorderOwner.current = operation;
+              await engine.micRecorder.start(selectedDeviceId);
+            },
             cancelCapture: async () => {
+              if (micRecorderOwner.current !== operation) return;
               const discarded = await engine.micRecorder.stop();
               if (discarded) URL.revokeObjectURL(discarded.url);
+              if (micRecorderOwner.current === operation) micRecorderOwner.current = null;
             },
             rollbackPlaybackOnAbort: rollbackCountInPlayback,
             isRecordingArmed: () => operation === micRecordingOperation.current
+              && projectGeneration === projectReplacementGeneration.current
+              && micRecorderOwner.current === operation
               && useDAWStore.getState().isMicRecording,
             getCurrentBeat: () => {
               const current = useDAWStore.getState();
               return transportPositionToBeats(Tone.Transport.position.toString(), current.timeSignature);
             },
-            isPlaybackActive: () => useDAWStore.getState().isPlaying,
+            isPlaybackActive: () => useDAWStore.getState().transportStatus === 'playing',
             startPlayback: () => {
               engine.play();
-              const current = useDAWStore.getState();
-              if (!current.isPlaying) current.togglePlay();
+              useDAWStore.getState().setTransportStatus('playing');
             },
           });
           if (startBeat == null) {
-            micRecordingTrackId.current = null;
+            if (micRecorderOwner.current === operation) micRecordingTrackId.current = null;
             return;
           }
+          if (micRecorderOwner.current !== operation
+            || projectGeneration !== projectReplacementGeneration.current
+            || operation !== micRecordingOperation.current) return;
           micRecordingTrackId.current = track.id;
           micRecordingStartBeat.current = startBeat;
         } catch (error) {
+          const ownsRecorder = micRecorderOwner.current === operation;
+          const ownsProject = projectGeneration === projectReplacementGeneration.current;
+          if (!ownsRecorder || !ownsProject || operation !== micRecordingOperation.current) return;
           const discarded = await engine.micRecorder.stop();
           if (discarded) URL.revokeObjectURL(discarded.url);
+          if (micRecorderOwner.current === operation) micRecorderOwner.current = null;
           micRecordingTrackId.current = null;
           toast.error(`Microphone access failed: ${error instanceof Error ? error.message : String(error)}`);
           const current = useDAWStore.getState();
           if (current.isMicRecording) current.toggleMicRecording();
         }
       } else if (engine.micRecorder.mediaRecorder?.state !== 'inactive') {
-        const recording = await engine.micRecorder.stop();
+        const recorderOwner = micRecorderOwner.current;
         const trackId = micRecordingTrackId.current;
+        const recording = await engine.micRecorder.stop();
+        if (micRecorderOwner.current !== recorderOwner) {
+          if (recording) URL.revokeObjectURL(recording.url);
+          return;
+        }
+        micRecorderOwner.current = null;
         micRecordingTrackId.current = null;
         if (recording && trackId) {
           const durationBeats = secondsToBeats(recording.durationSeconds, state.bpm);

@@ -237,9 +237,17 @@ export class AudioEngine {
     Tone.Transport.start();
   }
 
-  stop() {
-    Tone.Transport.stop();
-    Tone.Transport.position = 0;
+  stop(): boolean {
+    const transport = Tone.Transport as typeof Tone.Transport & { state?: string; ticks?: number };
+    const position = transport.position;
+    const atStart = Number(transport.ticks ?? 0) === 0
+      || position === 0
+      || position === '0:0:0';
+    if (transport.state === 'stopped' && atStart) return false;
+    for (const synth of this.synths.values()) synth.releaseAll?.(Tone.now());
+    transport.stop();
+    transport.position = 0;
+    return true;
   }
 
   pause() {
@@ -534,7 +542,7 @@ export class AudioEngine {
             velocity: note.velocity,
           }));
         const part = new Tone.Part((time, value) => {
-          synth.triggerAttackRelease(value.note, value.duration, time, value.velocity);
+          this.synths.get(clip.trackId)?.triggerAttackRelease(value.note, value.duration, time, value.velocity);
         }, events);
         part.start(startTime);
         this.partMap.set(clip.id, part);

@@ -38,6 +38,7 @@ export interface InstrumentPluginInstance {
     time?: Tone.Unit.Time,
     velocity?: number,
   ) => void;
+  releaseAll?: (time?: Tone.Unit.Time) => void;
   setParameters: (parameters: Record<string, PluginParameterValue>) => void;
   dispose: () => void;
 }

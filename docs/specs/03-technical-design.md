@@ -20,6 +20,8 @@
 | `src/store/dawStore.ts` | 规范化工程/UI 状态、同步 actions、撤销切片 | 文件 I/O、Tone 节点生命周期 |
 | `src/lib/audioEngine.ts` | Tone 节点、调度、传输、表头和实时播放 | React UI、工程文件解析 |
 | `src/lib/projectStorage.ts` | 包格式、迁移、文件/IDB 读写、最近项目 | UI Toast、直接依赖组件 |
+| `src/lib/projectStorage.ts`, `src/lib/projectReplacementRuntime.ts` | Project dirty 决策、临时解析、来源绑定、已验证 Store 提交与应用 runtime cleanup hook | UI Toast、渲染具体菜单 |
+| `src/lib/transportController.ts` | stopped/playing/paused 命令状态机、idle Stop 判定与统一副作用顺序 | Tone 节点实现、React 图标 |
 | `src/lib/recorder.ts` | 麦克风 MediaRecorder 生命周期 | 决定目标轨道和片段位置 |
 | `src/DAWApp.tsx` | 应用级副作用、快捷键、store→engine 同步 | 复杂领域转换 |
 | `src/components/DAW/*` | 用户交互和展示 | 定义持久化格式 |
@@ -43,9 +45,11 @@
 
 默认不写入工程：
 
-- `isPlaying`、`isRecording`、`isMicRecording`；
+- transport runtime（`stopped | playing | paused`）、`isRecording`、`isMicRecording`；
 - selected IDs、clipboard；
 - `bottomPanel`、`panelHeight`、`panelFullScreen`、`exportModalOpen`；
+- Plugin Inspector target/width/maximized、Route open/expanded/zoom、每 Track Mixer strip width；
+- Project Center 展开/焦点与当前 Local/GitHub/source binding 提示；
 - `zoom`、临时拖拽和上下文菜单状态；
 - undo/redo 历史。
 
@@ -101,6 +105,13 @@
 
 拖拽中的 pointermove 只更新预览；pointerup 一次提交。录音结束、量化多音符和删除轨道均为单历史事务。新建/打开工程后清空历史。
 
+### 6.3 可调整工作区
+
+- Inspector 和 Mixer Track strip 复用同一 clamp/keyboard 语义，但各自拥有 session state；separator 使用 Pointer Events 与 pointer capture，不绑定只支持 mouse 的全局拖拽。
+- `pointerup`、`pointercancel`、Escape、组件卸载和 owner 删除都必须清理 capture/listener/临时预览。separator 暴露 `role=separator`、`aria-orientation`、`aria-valuenow/min/max`，Arrow、Shift+Arrow、Home/End 可操作。
+- Inspector maximize 与 Route expanded 是两个独立应用布局状态，不调用浏览器 Fullscreen API，不改工程或音频图；退出后恢复原尺寸与触发焦点。
+- resize、Route open/expanded/zoom 和 strip widths 均不得进入 zundo partialize、recovery 或 package。
+
 ## 7. AudioEngine 同步
 
 ### 7.1 生命周期
@@ -118,9 +129,17 @@
 ### 7.3 调度
 
 - MIDI 事件时间 = `clip.start + note.start`；不播放片段长度之外的事件。
+- `Tone.Part` 等长生命周期调度回调不得捕获可被替换/dispose 的 instrument instance；事件执行时必须按 Track ID 解析当前实例。Track 删除后回调安全 no-op，热切换不得重复创建相同 Clip schedule。
 - Audio Player 从 `clip.start` 开始，并遵守裁剪长度。
 - Mute/Solo 决策应集中计算：存在任意 Solo 时只播放 Solo 且未 Mute 的轨道。
 - BPM/loop/拍号变化必须同步 Tone.Transport。
+
+### 7.4 Transport 命令与 voice 生命周期
+
+- 单一 transport controller 持有 `stopped | playing | paused` runtime 真值；TopBar、Space、Enter、Project 切换和录音流程不得复制 play/pause/stop 编排。
+- idle Stop 判定必须在任何 `Tone.start()`、Transport stop/position 写入或插件 voice 操作之前完成；严格 idle 时返回 no-op。
+- Pause 保留位置；Stop 从 playing/paused 原子取消未来 schedule、释放活动 voice、停止并归零。多次调用与卸载必须幂等。
+- Store 的兼容 `isPlaying` 若保留，必须由 runtime 状态派生，不能成为第二真值源；transport runtime 不 dirty、不 undo、不序列化。
 
 ## 8. 持久化数据流
 
@@ -139,16 +158,20 @@
 
 ### 8.2 加载
 
-1. 将输入完整读入临时内存；
-2. 验证 ZIP、manifest、版本和 JSON；
-3. 迁移旧 schema；
-4. 验证引用和范围；
-5. 提取资源并创建临时对象 URL；
-6. 所有步骤成功后原子替换 store；
-7. 清理旧运行时资源、清空历史和 dirty；
-8. 更新文件句柄与最近项目。
+所有 New、Recent、Local package、GitHub、Template 和 SMF 入口先进入统一 Project transaction；组件不得直接组合 `loadProject`、文件句柄、baseline、recovery 和 transport 副作用。
 
-步骤 2–5 失败时，撤销临时对象 URL 并保留当前工程。
+1. dirty 时请求统一 decision，取消则零副作用；
+2. 将输入完整读入临时内存；
+3. 验证 ZIP、manifest、版本和 JSON；
+4. 迁移旧 schema；
+5. 验证引用和范围；
+6. 提取资源并创建临时对象 URL；
+7. 所有步骤成功后停止 transport/录音并原子替换 store；
+8. 原子切换 local handle / GitHub binding，清理不属于新 Project 的旧绑定；
+9. 清理旧运行时资源、选择、Inspector、撤销历史和过期 recovery，再准确设置 dirty/checkpoint；
+10. 仅在事务提交后更新最近项目或 GitHub baseline。
+
+步骤 1–6 失败时，撤销临时对象 URL 并保留当前工程、句柄、baseline、dirty、undo 与最后有效 recovery。New/Template 生成新身份；Open/Save/Save As/Download/GitHub Sync 遵守既有身份合同。Project Center 与来源提示是 session state，不进入 `.duckdaw` 2.1.0。
 
 ### 8.3 自动恢复
 

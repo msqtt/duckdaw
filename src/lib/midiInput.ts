@@ -62,6 +62,7 @@ export class MidiCapture {
 export async function connectMidiInputs(
   onMessage: (data: Uint8Array) => void,
   deviceId?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<() => void> {
   const requestMIDIAccess = (navigator as Navigator & {
     requestMIDIAccess?: () => Promise<{ inputs: Map<unknown, { id: string; onmidimessage: ((event: { data: Uint8Array }) => void) | null }> }>;
@@ -80,10 +81,17 @@ export async function connectMidiInputs(
     if (inputs.length === 0) throw new Error('No MIDI input device is available');
   }
 
+  if (!isCurrent()) return () => {};
+
+  const handlers = new Map<typeof inputs[number], (event: { data: Uint8Array }) => void>();
   for (const input of inputs) {
-    input.onmidimessage = event => onMessage(event.data);
+    const handler = (event: { data: Uint8Array }) => onMessage(event.data);
+    handlers.set(input, handler);
+    input.onmidimessage = handler;
   }
   return () => {
-    for (const input of inputs) input.onmidimessage = null;
+    for (const input of inputs) {
+      if (input.onmidimessage === handlers.get(input)) input.onmidimessage = null;
+    }
   };
 }

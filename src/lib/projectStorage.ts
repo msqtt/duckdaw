@@ -9,6 +9,7 @@ import {
 } from '../store/dawStore';
 import { measurePerfAsync } from './performance';
 import { createDefaultAudioEdit } from './audioEditing';
+import { prepareForProjectReplacement } from './projectReplacementRuntime';
 import { requestDecision } from './decisionService';
 import { createDefaultTempoMap, validateTempoMap, type TempoPoint } from './tempoMap';
 import { normalizeAutomationLane, type AutomationLane } from './automation';
@@ -706,6 +707,77 @@ const LEGACY_RECOVERY_SNAPSHOT_KEY = 'duckdaw_recovery_snapshot_v1';
 const RECOVERY_SNAPSHOT_KEY = 'duckdaw_recovery_snapshot_v2';
 const RECOVERY_ASSET_PREFIX = 'duckdaw_recovery_asset_v2:';
 
+export async function detachCurrentProjectFile(): Promise<void> {
+  await idb.del(FILE_HANDLE_KEY);
+}
+
+
+
+interface ProjectLoadCommitOptions {
+  projectName: string;
+  dirty: boolean;
+  fileHandle: unknown | null;
+  recentHandle?: unknown;
+}
+
+async function commitProjectLoad(
+  project: Partial<PersistedProjectState>,
+  options: ProjectLoadCommitOptions,
+): Promise<void> {
+  await prepareForProjectReplacement();
+  const previousHandle = await idb.get(FILE_HANDLE_KEY);
+  const restorePreviousHandle = async (cause: unknown) => {
+    try {
+      if (previousHandle == null) await idb.del(FILE_HANDLE_KEY);
+      else await idb.set(FILE_HANDLE_KEY, previousHandle);
+    } catch (rollbackError) {
+      try { await idb.del(FILE_HANDLE_KEY); } catch { /* Storage is unavailable; surface both failures. */ }
+      throw new AggregateError([cause, rollbackError], 'Project source binding and rollback both failed');
+    }
+  };
+
+  try {
+    if (options.fileHandle == null) await idb.del(FILE_HANDLE_KEY);
+    else await idb.set(FILE_HANDLE_KEY, options.fileHandle);
+  } catch (error) {
+    await restorePreviousHandle(error);
+    throw error;
+  }
+
+  const loaded = useDAWStore.getState().loadProject(project);
+  if (!loaded) {
+    const error = new Error('Project data could not be normalized');
+    await restorePreviousHandle(error);
+    throw error;
+  }
+  useDAWStore.getState().setProjectName(options.projectName);
+  useDAWStore.getState().setDirty(options.dirty);
+  dawStore.temporal.getState().clear();
+
+  try {
+    await clearRecoverySnapshot();
+  } catch (error) {
+    console.error('Failed to clear the previous recovery snapshot after Project commit', error);
+  }
+
+  if (options.recentHandle != null) {
+    try {
+      await addToRecentProjects(options.projectName, options.recentHandle);
+    } catch {
+      // Recent history is best-effort and must not invalidate an active Project commit.
+    }
+  }
+}
+
+export async function commitExternalProjectLoad(
+  project: Partial<PersistedProjectState>,
+  options: { projectName: string; dirty: boolean },
+): Promise<void> {
+  await commitProjectLoad(project, {
+    ...options,
+    fileHandle: null,
+  });
+}
 interface LegacyRecoverySnapshot {
   projectId: string;
   updatedAt: number;
@@ -740,8 +812,16 @@ async function hashRecoveryAsset(data: ArrayBuffer): Promise<string> {
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}-${data.byteLength}`;
 }
 
+
+let recoveryOperationQueue: Promise<void> = Promise.resolve();
+
+function serializeRecoveryOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = recoveryOperationQueue.then(operation, operation);
+  recoveryOperationQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
 export async function saveRecoverySnapshot(): Promise<IncrementalRecoverySnapshot> {
-  return measurePerfAsync('recovery-save', async () => {
+  return serializeRecoveryOperation(() => measurePerfAsync('recovery-save', async () => {
   const state = useDAWStore.getState();
   const previous = await getRecoverySnapshot();
   const project = structuredClone(state.getProjectData());
@@ -775,7 +855,7 @@ export async function saveRecoverySnapshot(): Promise<IncrementalRecoverySnapsho
     }
   }
   return snapshot;
-  });
+  }));
 }
 
 export async function getRecoverySnapshot(): Promise<RecoverySnapshot | null> {
@@ -785,25 +865,28 @@ export async function getRecoverySnapshot(): Promise<RecoverySnapshot | null> {
 }
 
 export async function clearRecoverySnapshot(): Promise<void> {
-  const snapshot = await getRecoverySnapshot();
-  if (snapshot && 'version' in snapshot && snapshot.version === 2) {
-    await Promise.all(snapshot.assetIds.map(assetId => idb.del(`${RECOVERY_ASSET_PREFIX}${assetId}`)));
-  }
-  await Promise.all([
-    idb.del(RECOVERY_SNAPSHOT_KEY),
-    idb.del(LEGACY_RECOVERY_SNAPSHOT_KEY),
-  ]);
+  await serializeRecoveryOperation(async () => {
+    const snapshot = await getRecoverySnapshot();
+    if (snapshot && 'version' in snapshot && snapshot.version === 2) {
+      await Promise.all(snapshot.assetIds.map(assetId => idb.del(`${RECOVERY_ASSET_PREFIX}${assetId}`)));
+    }
+    await Promise.all([
+      idb.del(RECOVERY_SNAPSHOT_KEY),
+      idb.del(LEGACY_RECOVERY_SNAPSHOT_KEY),
+    ]);
+  });
 }
 
 export async function restoreRecoverySnapshot(): Promise<boolean> {
   const snapshot = await getRecoverySnapshot();
   if (!snapshot) return false;
+  let project: Partial<PersistedProjectState>;
   if ('packageData' in snapshot) {
     const pkg = await loadDuckDawPackage(new Blob([snapshot.packageData], { type: 'application/zip' }));
-    useDAWStore.getState().loadProject(pkg.project);
+    project = pkg.project;
   } else {
-    const project = structuredClone(snapshot.project);
-    for (const clip of project.clips) {
+    project = structuredClone(snapshot.project);
+    for (const clip of project.clips ?? []) {
       if (clip.type !== 'audio' || !clip.bufferUrl?.startsWith('recovery-assets/')) continue;
       const assetId = clip.bufferUrl.slice('recovery-assets/'.length);
       const asset = await idb.get<RecoveryAsset>(`${RECOVERY_ASSET_PREFIX}${assetId}`);
@@ -811,9 +894,11 @@ export async function restoreRecoverySnapshot(): Promise<boolean> {
       clip.mimeType = asset.mimeType;
       clip.bufferUrl = URL.createObjectURL(new Blob([asset.data], { type: asset.mimeType }));
     }
-    useDAWStore.getState().loadProject(project);
   }
-  useDAWStore.getState().setDirty(true);
+  await commitExternalProjectLoad(project, {
+    projectName: project.projectName || 'Recovered Project',
+    dirty: true,
+  });
   return true;
 }
 
@@ -862,18 +947,15 @@ export async function openTemplate(templateData: ArrayBuffer) {
   const blob = new Blob([templateData], { type: 'application/zip' });
   const file = new File([blob], 'template.duckdaw');
   const pkg = await loadDuckDawPackage(file);
-  useDAWStore.getState().loadProject({
+  await commitExternalProjectLoad({
     ...pkg.project,
     projectId: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     projectName: pkg.manifest.name || 'New Project',
+  }, {
+    projectName: pkg.manifest.name || 'New Project',
+    dirty: true,
   });
-  useDAWStore.getState().setDirty(true);
-  dawStore.temporal.getState().clear();
-  
-  // A template instance is always a new unsaved project.
-  await idb.del(FILE_HANDLE_KEY);
-  await clearRecoverySnapshot();
 }
 
 export async function getRecentProjects(): Promise<RecentProject[]> {
@@ -967,28 +1049,25 @@ export async function openProject() {
   
   const file = await handles[0].getFile();
   const isLegacy = file.name.endsWith('.json');
-  let pkg;
+  let project: Partial<PersistedProjectState>;
+  let projectName: string;
   if (isLegacy) {
     const text = await file.text();
-    const legacyProject = JSON.parse(text);
-    validatePersistedProjectState(legacyProject);
-    useDAWStore.getState().loadProject(legacyProject);
-    useDAWStore.getState().setProjectName(file.name.replace('.json', ''));
+    project = JSON.parse(text);
+    validatePersistedProjectState(project);
+    projectName = file.name.replace('.json', '');
   } else {
-    pkg = await loadDuckDawPackage(file);
-    useDAWStore.getState().loadProject(pkg.project);
-    useDAWStore.getState().setProjectName(pkg.manifest.name || file.name.replace('.duckdaw', ''));
+    const pkg = await loadDuckDawPackage(file);
+    project = pkg.project;
+    projectName = pkg.manifest.name || file.name.replace('.duckdaw', '');
   }
-  
-  dawStore.temporal.getState().clear();
-  if (isLegacy) {
-    await idb.del(FILE_HANDLE_KEY);
-    useDAWStore.getState().setDirty(true);
-  } else {
-    await idb.set(FILE_HANDLE_KEY, handles[0]);
-    useDAWStore.getState().setDirty(false);
-  }
-  await addToRecentProjects(useDAWStore.getState().projectName, handles[0]);
+
+  await commitProjectLoad(project, {
+    projectName,
+    dirty: isLegacy,
+    fileHandle: isLegacy ? null : handles[0],
+    recentHandle: handles[0],
+  });
   return true;
 }
 
@@ -1003,28 +1082,25 @@ export async function openRecentProject(handle: any) {
   
   const file = await handle.getFile();
   const isLegacy = file.name.endsWith('.json');
-  let pkg;
+  let project: Partial<PersistedProjectState>;
+  let projectName: string;
   if (isLegacy) {
     const text = await file.text();
-    const legacyProject = JSON.parse(text);
-    validatePersistedProjectState(legacyProject);
-    useDAWStore.getState().loadProject(legacyProject);
-    useDAWStore.getState().setProjectName(file.name.replace('.json', ''));
+    project = JSON.parse(text);
+    validatePersistedProjectState(project);
+    projectName = file.name.replace('.json', '');
   } else {
-    pkg = await loadDuckDawPackage(file);
-    useDAWStore.getState().loadProject(pkg.project);
-    useDAWStore.getState().setProjectName(pkg.manifest.name || file.name.replace('.duckdaw', ''));
+    const pkg = await loadDuckDawPackage(file);
+    project = pkg.project;
+    projectName = pkg.manifest.name || file.name.replace('.duckdaw', '');
   }
-  
-  dawStore.temporal.getState().clear();
-  if (isLegacy) {
-    await idb.del(FILE_HANDLE_KEY);
-    useDAWStore.getState().setDirty(true);
-  } else {
-    await idb.set(FILE_HANDLE_KEY, handle);
-    useDAWStore.getState().setDirty(false);
-  }
-  await addToRecentProjects(useDAWStore.getState().projectName, handle);
+
+  await commitProjectLoad(project, {
+    projectName,
+    dirty: isLegacy,
+    fileHandle: isLegacy ? null : handle,
+    recentHandle: handle,
+  });
   return true;
 }
 
@@ -1045,9 +1121,7 @@ export async function confirmDiscardChanges(): Promise<boolean> {
 export async function createNewProject(): Promise<boolean> {
   if (!await confirmDiscardChanges()) return false;
 
-  await idb.del(FILE_HANDLE_KEY);
-  await clearRecoverySnapshot();
-  useDAWStore.getState().loadProject({
+  await commitExternalProjectLoad({
     projectId: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     projectName: 'New Project',
@@ -1058,8 +1132,9 @@ export async function createNewProject(): Promise<boolean> {
     markers: [],
     arrangements: [{ id: 'main', name: 'Main Arrangement' }],
     activeArrangementId: 'main',
+  }, {
+    projectName: 'New Project',
+    dirty: true,
   });
-  useDAWStore.getState().setDirty(true);
-  dawStore.temporal.getState().clear();
   return true;
 }

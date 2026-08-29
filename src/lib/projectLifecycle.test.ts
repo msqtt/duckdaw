@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
+import * as idb from 'idb-keyval';
 
 const memory = vi.hoisted(() => new Map<string, unknown>());
 const confirmMock = vi.hoisted(() => vi.fn());
@@ -17,8 +18,10 @@ vi.mock('./decisionService', () => ({
 }));
 
 import {
+  commitExternalProjectLoad,
   createNewProject,
   deleteTemplate,
+  detachCurrentProjectFile,
   getTemplates,
   openTemplate,
   saveAsTemplate,
@@ -88,6 +91,57 @@ describe('project lifecycle and templates', () => {
       isDirty: true,
     });
     expect(dawStore.getState().projectId).not.toBe(project.meta.projectId);
+  });
+
+  it('preserves the active project and old handle when an external source cannot detach it', async () => {
+    const oldHandle = { name: 'old.duckdaw' };
+    memory.set('duckdaw_current_file_handle', oldHandle);
+    vi.mocked(idb.del).mockRejectedValueOnce(new Error('IDB unavailable'));
+
+    await expect(commitExternalProjectLoad({
+      projectName: 'Imported',
+      tracks: [],
+      clips: [],
+    }, { projectName: 'Imported', dirty: true })).rejects.toThrow('IDB unavailable');
+
+    expect(dawStore.getState().projectId).toBe('source-project');
+    expect(memory.get('duckdaw_current_file_handle')).toBe(oldHandle);
+  });
+
+  it('rolls back the source binding when candidate normalization fails', async () => {
+    const oldHandle = { name: 'old.duckdaw' };
+    memory.set('duckdaw_current_file_handle', oldHandle);
+
+    await expect(commitExternalProjectLoad({
+      projectName: 'Invalid',
+      tracks: [{
+        id: 'audio-1',
+        name: 'Audio',
+        type: 'audio',
+        volume: 1,
+        pan: 0,
+        isMuted: false,
+        isSolo: false,
+        color: '#fff',
+        reverb: 0,
+        delay: 0,
+        automationLanes: [],
+        instrumentPlugin: { id: 'bad', pluginId: 'duckdaw.instrument.synth', pluginVersion: '1.0.0', enabled: true, parameters: {} },
+      }],
+      clips: [],
+    }, { projectName: 'Invalid', dirty: true })).rejects.toThrow('could not be normalized');
+
+    expect(dawStore.getState().projectId).toBe('source-project');
+    expect(memory.get('duckdaw_current_file_handle')).toBe(oldHandle);
+  });
+
+  it('detaches the previous file handle before committing an external project source', async () => {
+    memory.set('duckdaw_current_file_handle', { name: 'old.duckdaw' });
+
+    await detachCurrentProjectFile();
+
+    expect(memory.has('duckdaw_current_file_handle')).toBe(false);
+    expect(dawStore.getState().projectId).toBe('source-project');
   });
 
   it('deletes a saved template', async () => {

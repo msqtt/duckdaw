@@ -21,13 +21,18 @@
 | 混音/资源生命周期 | FR-MIX-01~03 | 已实现 | `mixSettings.test.ts`, `audioEngine.test.ts` |
 | 可视化路由/聚合通道、确定性 Solo、频谱参数 EQ | MIX-ROUTE-03, MIX-SOLO-01, PLUG-EQ-01 | 已实现；格式保持 2.1.0；完整本地门禁与独立复审 PASS，无 P0/P1 | `routingGraph.test.ts`, `routingPatch.test.ts`, `routingStore.test.ts`, `audioEngineRouting.test.ts`, `audioEngineAutomation.test.ts`, `audioEnginePlugin.test.ts`, `parametricEq.test.ts`, `pluginPersistence.test.ts`, `MIX-E2E-03` |
 | 统一 Instrument/Effect Plugin SDK | PLUG-SDK-01/02, PLUG-INST-01, PLUG-FX-01, PLUG-FMT-01, PLUG-DEV-01, PLUG-UI-01 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `08-plugin-sdk.md`；`pluginInspectorStore.test.ts`、`pluginUi.test.ts`、`PLUG-E2E-01` |
+| MIDI 乐器热切换连续性 | PLUG-INST-02 | **已实现**：Part 事件时动态解析当前实例；active Stop 释放 voice；独立复审无 P0/P1 | `PLUG-T13~15`, `PLUG-E2E-02` |
+| Inspector/Route/Mixer 可调整工作区 | PLUG-UI-02, MIX-ROUTE-04, MIX-UI-01 | **已实现**：session-only resize/maximize/disclosure/zoom/Track widths | `PLUG-UI-T02-*`, `MIX-ROUTE-T04-*`, `MIX-UI-T01-*` |
+| EQ compact name 与主题 | PLUG-EQ-02 | **已实现**：stable plugin/parameter identity，Light/Dark/System 只改视觉 | `PLUG-EQ-T04/05`, `PLUG-EQ-E2E-02` |
+| Transport 真值与 idle Stop | FR-TRN-07 | **已实现**：显式状态机、idle no-op、真实 glyph、voice/录音清理 | `TRN-T07-01~04`, `TRN-E2E-07` |
+| 统一 Project Center 与来源事务 | FR-PROJ-09 | **已实现**：New/Recent/Local/GitHub 集中入口、来源绑定/恢复/异步录音 ownership 隔离 | `PROJ-T09-01~07`, `PROJ-E2E-09` |
 | 通用控件 Automation | AUTO-02 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `09-automation.md`；AUTO-T02-01~06、AUTO-E2E-02 |
 | 离线导出 | FR-EXP-01 | 已实现 | `exportPlan.test.ts`, `ExportModal.tsx` |
 | 撤销/主题/反馈/快捷键 | FR-UI-01~04 | 已实现 | `editingInvariants.test.ts`, `complianceContracts.test.ts` |
 
 ## 2. 差距闭环
 
-以下基线差距均已闭环：
+以下基线差距 GAP-001~022 均已闭环；GAP-016~022 通过真实调用链、失败/取消竞态测试、三浏览器门禁和独立复审后关闭：
 
 | GAP | 原问题 | 完成实现与证据 |
 |---|---|---|
@@ -46,6 +51,13 @@
 | GAP-013 | GitHub token/冲突风险 | sessionStorage、风险说明/清除、编码、SHA 和 409 提示；合规契约测试 |
 | GAP-014 | 资源释放/类型约束 | Tone 节点 dispose、Blob URL 所有权、跨类型拒绝；音频/编辑测试 |
 | GAP-015 | 反馈/基础可访问性不统一 | Toast、业务 alert/console-only 清零、dialog/aria/button 语义；合规契约测试 |
+| GAP-016 | MIDI 换 instrument 后既有 Part 调用已 dispose 实例 | 已关闭：事件时动态解析当前实例、删除 no-op、Stop `releaseAll`；`audioEnginePlugin.test.ts`, `PLUG-E2E-02` |
+| GAP-017 | Plugin Inspector 固定宽且不可最大化 | 已关闭：可访问 pointer/keyboard resize + workspace Maximize/Restore；store/E2E |
+| GAP-018 | Route 永久占据 Mixer 且无 expanded workspace | 已关闭：默认关闭、开关与 Expand/Restore，graph/zoom 保持；store/E2E |
+| GAP-019 | Track strip 固定 128px，插件名可读性不足 | 已关闭：按 Track session width、删除清理；store/E2E |
+| GAP-020 | 参数 EQ 名称过长且图形硬编码暗色 | 已关闭：`Parametric EQ` + class-driven theme tokens，stable schema；unit/E2E |
+| GAP-021 | idle Stop 可产生瞬态且 Play/Pause glyph 不真实 | 已关闭：显式 transport state、idle no-op、voice/录音 cleanup、真实 glyph；unit/E2E |
+| GAP-022 | Project 生命周期入口分散、来源绑定可能串线 | 已关闭：Project Center、verified source commit、recovery serialization、GitHub/MIDI/Mic ownership；lifecycle/recovery/E2E |
 
 ## 3. 数据安全边界
 
@@ -82,6 +94,13 @@
 | MIX-E2E-03 | 可视化端口、Bus/EQ、键盘与 pointer、undo、Solo→Bus meter、unsupported analyser fallback | MIX-ROUTE-03, MIX-SOLO-01, PLUG-EQ-01 | Chromium/Firefox/WebKit 3/3；完整矩阵 36/36 |
 | PLUG-T01~T09 | registry、参数、迁移、未知插件、共享 factory、dispose、Store/UI、内置插件 | Plugin SDK | 已通过：`pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `projectStorage.test.ts` |
 | PLUG-T10~T12 | 三浏览器/a11y、ordered multi-instance chain 与全质量门禁 | Plugin SDK | 已通过：Playwright Chromium/Firefox/WebKit 24/24；unit 316/316、typecheck、build、size、diff 均通过 |
+| PLUG-T13~T15 / PLUG-E2E-02 | 既有 MIDI Part 热切换当前 instrument、fallback/删除/释放与真实持续发声 | PLUG-INST-02 | 已通过：动态实例与 releaseAll 单测；三浏览器真实 Track→Bus meter |
+| PLUG-UI-T02-01~02 / PLUG-E2E-03 | Inspector resize/maximize、cleanup、焦点与零持久副作用 | PLUG-UI-02 | 已通过：store 4/4；三浏览器 workspace 路径 |
+| MIX-ROUTE-T04-01~02 / MIX-E2E-04 | Route 默认关闭、pending cancel、graph/zoom 保持与 expanded layout | MIX-ROUTE-04 | 已通过：Mixer UI store 与三浏览器 workspace 路径 |
+| MIX-UI-T01-01~02 / MIX-E2E-05 | Track strip 独立宽度、删除清理、滚动/sticky Master | MIX-UI-01 | 已通过：store 与三浏览器 workspace 路径 |
+| PLUG-EQ-T04~05 / PLUG-EQ-E2E-02 | compact display identity 与 Light/Dark/System 视觉/音频隔离 | PLUG-EQ-02 | 已通过：stable 32 参数与 computed SVG fill 主题切换 |
+| TRN-T07-01~04 / TRN-E2E-07 | idle Stop no-op、状态机、voice cleanup 与 glyph | FR-TRN-07 | 已通过：controller/Store/AudioEngine 与三浏览器 glyph/time 路径 |
+| PROJ-T09-01~07 / PROJ-E2E-09 | 统一 Project dirty/source/identity/baseline/迁移事务与 UI | FR-PROJ-09 | 已通过：IDB rollback、recovery queue、GitHub baseline、MIDI/Mic old-after-new ownership 与 Project Center |
 | AUTO-T02-01~06 | dynamic target、ensure/undo、Track curve、plugin realtime/offline、package 往返 | AUTO-02 | 已通过：`automationControl.test.ts`, `automationWorkflow.test.ts`, `audioEngineAutomation.test.ts`, `projectStorage.test.ts` |
 | AUTO-E2E-02 | 控件直建、曲线增点/拖点、Instrument/Effect、undo/redo、WAV offline | AUTO-02 | Chromium/Firefox/WebKit 3/3 通过；包含真实 download |
 | T-EXPORT-01 | sample rate、full/selection、空工程 | FR-EXP-01 | `exportPlan.test.ts` |
@@ -110,3 +129,5 @@ REC-PRO-05 最终证据（2026-08-24）：目标录音/Count-in/Store 回归 53/
 Batch E2 最终证据：全量 Vitest 53 files、336/336；TypeScript no-emit、production build、`npm audit`（0 vulnerabilities）与 `git diff --check` 通过；bundle 为 DAWApp 399.30/400 KiB、Tone 267.40/300 KiB、React 189.40/220 KiB、ExportModal 19.93/40 KiB、daw-domain 10.73/40 KiB、duckdaw-plugins 12.39/40 KiB。`MIX-E2E-03` Chromium/Firefox/WebKit 3/3，CI 等价单 worker/2 retries 完整矩阵 36/36 且最终运行未发生实际 retry。三轮独立调用链复审依次关闭 PRE Send gate、FFT fallback、Automation 跨图保持、lane 禁用/删除 override 清理及持久化重复 Send，最终结论 **PASS，无 P0/P1**。远端 CI、staging 部署和 DNS/TLS 不属于本地实现完成证据，仍按发布门禁单独验证。
 
 历史资料仍按 `docs/specs/README.md` 的权威顺序处理，不覆盖本矩阵。
+
+Batch I 最终本地证据（2026-08-24）：全量 Vitest 55 files、353/353；TypeScript no-emit、production build、`npm audit`（0 vulnerabilities）、冻结 bundle budget 与 `git diff --check` 通过；DAWApp 约 351.19/400 KiB、Tone 267.44/300、React 189.40/220、ExportModal 20/40。Playwright Chromium/Firefox/WebKit 覆盖 21 条用户路径/浏览器，包括 MIDI 热切换真实 Bus meter、idle Stop/glyph、workspace、统一 Project Center、source rollback、recovery serialization、Project replacement 与 MIDI/Mic old-after-new ownership。多轮独立真实调用链审查关闭全部录音/来源/voice 生命周期竞态，最终结论 **PASS，无 P0/P1**。远端 CI、Netlify staging 和精确 SHA 仍须在 push 后记录。

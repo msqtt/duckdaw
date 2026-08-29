@@ -1,22 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { dawStore, useDAWStore } from '../../store/dawStore';
-import { Github, FileDown, FileUp, Moon, Sun, X } from 'lucide-react';
+import { useDAWStore } from '../../store/dawStore';
+import { Github, FileDown, FileUp, Moon, Sun, X, Plus, Clock } from 'lucide-react';
 import { Dropdown } from '../ui/Dropdown';
-import { clearRecoverySnapshot, createDuckDawPackage, loadDuckDawPackage, saveRecoverySnapshot, saveToFileSystemAsDownload, confirmDiscardChanges, validatePersistedProjectState } from '../../lib/projectStorage';
-import { createGitHubBaselineStore, createGitHubContentsClient, saveGitHubProject, type GitHubRemoteFile } from '../../lib/githubSync';
+import {
+  clearRecoverySnapshot,
+  commitExternalProjectLoad,
+  confirmDiscardChanges,
+  createDuckDawPackage,
+  createNewProject,
+  getRecentProjects,
+  loadDuckDawPackage,
+  openRecentProject,
+  saveRecoverySnapshot,
+  saveToFileSystemAsDownload,
+  validatePersistedProjectState,
+  type RecentProject,
+} from '../../lib/projectStorage';
+import { createGitHubBaselineStore, createGitHubContentsClient, saveGitHubProject, type GitHubBaselineStore, type GitHubRemoteFile } from '../../lib/githubSync';
 import { listMidiInputs, listAudioInputs, checkMidiSupport, checkAudioInputSupport, type InputDevice } from '../../lib/inputDevices';
 import { importMidi, exportMidi } from '../../lib/midiIo';
 import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+const GITHUB_PROJECT_BINDING_KEY = 'duckdaw_github_project_binding_v1';
+
+export function SettingsModal({
+  onClose,
+  mode = 'settings',
+}: {
+  onClose: () => void;
+  mode?: 'settings' | 'project';
+}) {
+  const isProjectCenter = mode === 'project';
   const titleId = React.useId();
-  const { theme, toggleTheme, loadProject, tracks, clips } = useDAWStore(useShallow(state => ({
+  const { theme, toggleTheme } = useDAWStore(useShallow(state => ({
     theme: state.theme,
     toggleTheme: state.toggleTheme,
-    loadProject: state.loadProject,
-    tracks: state.tracks,
-    clips: state.clips,
   })));
   const [githubToken, setGithubToken] = useState(sessionStorage.getItem('github_token') || '');
   const [githubRepo, setGithubRepo] = useState(localStorage.getItem('github_repo') || '');
@@ -24,6 +43,37 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [githubBaselines] = useState(() => createGitHubBaselineStore(localStorage));
 
   // Input device state
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+
+  const githubBaselinesForActiveProject: GitHubBaselineStore = {
+    get: (repo, path) => {
+      try {
+        const binding = JSON.parse(localStorage.getItem(GITHUB_PROJECT_BINDING_KEY) || 'null') as {
+          projectId?: string;
+          repo?: string;
+          path?: string;
+        } | null;
+        const currentProjectId = useDAWStore.getState().projectId;
+        if (binding?.projectId !== currentProjectId || binding.repo !== repo || binding.path !== path) return undefined;
+        return githubBaselines.get(repo, path);
+      } catch {
+        return undefined;
+      }
+    },
+    set: (repo, path, sha) => {
+      githubBaselines.set(repo, path, sha);
+      localStorage.setItem(GITHUB_PROJECT_BINDING_KEY, JSON.stringify({
+        projectId: useDAWStore.getState().projectId,
+        repo,
+        path,
+      }));
+    },
+  };
+  useEffect(() => {
+    if (!isProjectCenter) return;
+    void getRecentProjects().then(setRecentProjects).catch(() => setRecentProjects([]));
+  }, [isProjectCenter]);
+
   const [midiDevices, setMidiDevices] = useState<InputDevice[]>([]);
   const [audioDevices, setAudioDevices] = useState<InputDevice[]>([]);
   const [selectedMidiId, setSelectedMidiId] = useState<string>(localStorage.getItem('duckdaw_midi_device') || '');
@@ -33,6 +83,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [deviceError, setDeviceError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isProjectCenter) return;
     let active = true;
     (async () => {
       try {
@@ -49,7 +100,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       }
     })();
     return () => { active = false; };
-  }, [midiSupported, audioSupported]);
+  }, [isProjectCenter, midiSupported, audioSupported]);
 
   const handleMidiDeviceChange = (deviceId: string) => {
     setSelectedMidiId(deviceId);
@@ -72,7 +123,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleSmfImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !(await confirmDiscardChanges())) return;
     try {
       const buffer = await file.arrayBuffer();
       const result = importMidi(buffer);
@@ -107,16 +158,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         notes: t.notes,
         color: importedTracks[i].color,
       }));
-      loadProject({
-        projectName: file.name.replace(/\.(mid|midi|smf)$/i, ''),
+      const projectName = file.name.replace(/\.(mid|midi|smf)$/i, '');
+      await commitExternalProjectLoad({
+        projectName,
         bpm: result.tempo,
         timeSignature: result.timeSignature,
         tracks: importedTracks,
         clips: importedClips,
         arrangements: [{ id: 'main', name: 'Main Arrangement' }],
         activeArrangementId: 'main',
-      });
-      dawStore.temporal.getState().clear();
+      }, { projectName, dirty: true });
       toast.success(`Imported ${result.tracks.length} MIDI track(s)`);
       onClose();
     } catch (err) {
@@ -173,15 +224,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     try {
       if (file.name.endsWith('.duckdaw') || file.name.endsWith('.zip')) {
         const pkg = await loadDuckDawPackage(file);
-        loadProject(pkg.project); 
+        await commitExternalProjectLoad(pkg.project, {
+          projectName: pkg.manifest.name || file.name.replace(/\.(duckdaw|zip)$/i, ''),
+          dirty: true,
+        });
       } else {
         const text = await file.text();
         const json = JSON.parse(text);
         validatePersistedProjectState(json);
-        loadProject(json);
-        useDAWStore.getState().setDirty(true);
+        await commitExternalProjectLoad(json, {
+          projectName: json.projectName || file.name.replace(/\.json$/i, ''),
+          dirty: true,
+        });
       }
-      dawStore.temporal.getState().clear();
       toast.success('Project loaded successfully');
       onClose();
     } catch(error) {
@@ -204,18 +259,21 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     if (confirmDiscard && !(await confirmDiscardChanges())) return false;
     const base64Content = remote.content.replace(/\s/g, '');
 
+    let project: Parameters<typeof commitExternalProjectLoad>[0];
     if (path.endsWith('.json')) {
-      const data = JSON.parse(atob(base64Content));
-      validatePersistedProjectState(data);
-      loadProject(data);
+      project = JSON.parse(atob(base64Content));
+      validatePersistedProjectState(project);
     } else {
       const binaryString = atob(base64Content);
       const bytes = Uint8Array.from(binaryString, value => value.charCodeAt(0));
       const pkg = await loadDuckDawPackage(new Blob([bytes], { type: 'application/zip' }));
-      loadProject(pkg.project);
+      project = pkg.project;
     }
 
-    dawStore.temporal.getState().clear();
+    await commitExternalProjectLoad(project, {
+      projectName: project.projectName || path.split('/').pop()?.replace(/\.(duckdaw|json)$/i, '') || 'GitHub Project',
+      dirty: false,
+    });
     toast.success('Project loaded from GitHub successfully');
     onClose();
     return true;
@@ -247,7 +305,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const client = createGithubClient();
       const resolution = await saveGitHubProject({
         client,
-        baselines: githubBaselines,
+        baselines: githubBaselinesForActiveProject,
         path: githubPath,
         content,
         actions: {
@@ -267,7 +325,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       } else if (resolution === 'reloaded') {
         // applyRemote owns success feedback and closes the modal.
       } else {
-        if (resolution === 'saved' || resolution === 'saved-copy') await clearRecoverySnapshot();
+        if (resolution === 'saved' || resolution === 'saved-copy' || resolution === 'overwritten') await clearRecoverySnapshot();
         toast.success(resolution === 'saved-copy'
           ? 'Conflict copy saved to GitHub'
           : resolution === 'overwritten'
@@ -290,10 +348,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       const remote = await client.read(githubPath);
       if (!remote) throw new Error('GitHub project file was not found');
       if (await applyRemoteProject(githubPath, remote, true)) {
-        githubBaselines.set(client.repo, githubPath, remote.sha);
+        githubBaselinesForActiveProject.set(client.repo, githubPath, remote.sha);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `GitHub load failed: ${String(error)}`);
+    }
+  };
+
+  const handleCreateNewProject = async () => {
+    if (await createNewProject()) onClose();
+  };
+
+  const handleOpenRecentProject = async (recent: RecentProject) => {
+    try {
+      if (await openRecentProject(recent.handle)) onClose();
+    } catch (error) {
+      toast.error(`Failed to open recent project: ${error instanceof Error ? error.message : String(error)}`);
+      setRecentProjects(await getRecentProjects());
     }
   };
 
@@ -301,13 +372,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg shadow-xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden text-neutral-800 dark:text-neutral-200">
         <div className="flex items-center justify-between p-4 border-b border-neutral-300 dark:border-neutral-800">
-          <h2 id={titleId} className="text-lg font-bold">Settings</h2>
-          <button aria-label="Close settings" onClick={onClose} className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded">
+          <h2 id={titleId} className="text-lg font-bold">{isProjectCenter ? 'Project Center' : 'Settings'}</h2>
+          <button aria-label={isProjectCenter ? 'Close project center' : 'Close settings'} onClick={onClose} className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded">
             <X size={20} />
           </button>
         </div>
 
         <div className="p-4 space-y-6 overflow-y-auto">
+          {!isProjectCenter && <>
           {/* Appearance Section */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold uppercase text-neutral-500">Appearance</h3>
@@ -387,6 +459,40 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             </div>
+          </div>
+          </>}
+
+          {isProjectCenter && <>
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase text-neutral-500">New Project</h3>
+            <button
+              type="button"
+              onClick={handleCreateNewProject}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded transition-colors"
+            >
+              <Plus size={16} /> Create New Project
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase text-neutral-500">Recent Projects</h3>
+            {recentProjects.length === 0 ? (
+              <p className="text-sm text-neutral-500">No recent projects</p>
+            ) : (
+              <div className="space-y-2">
+                {recentProjects.map((recent, index) => (
+                  <button
+                    key={`${recent.name}-${recent.lastOpened}-${index}`}
+                    type="button"
+                    onClick={() => void handleOpenRecentProject(recent)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 rounded transition-colors"
+                  >
+                    <Clock size={16} />
+                    <span className="truncate">{recent.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* SMF Import/Export Section */}
@@ -481,6 +587,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
             </div>
           </div>
+          </>}
           <div className="pt-3 border-t border-neutral-300 dark:border-neutral-800">
             <a
               href="/THIRD_PARTY_NOTICES.txt"

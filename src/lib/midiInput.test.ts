@@ -60,6 +60,24 @@ describe('connectMidiInputs device selection (REC-PRO-01)', () => {
     expect(input1.onmidimessage).toBeNull();
   });
 
+  it('does not overwrite or disconnect a handler owned by a newer operation', async () => {
+    const newerHandler = vi.fn();
+    const input = { id: 'dev-1', onmidimessage: newerHandler as ((event: { data: Uint8Array }) => void) | null };
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: vi.fn().mockResolvedValue({ inputs: new Map([['dev-1', input]]) }),
+    });
+
+    const staleDisconnect = await connectMidiInputs(vi.fn(), undefined, () => false);
+    expect(input.onmidimessage).toBe(newerHandler);
+    staleDisconnect();
+    expect(input.onmidimessage).toBe(newerHandler);
+
+    const ownedDisconnect = await connectMidiInputs(vi.fn());
+    input.onmidimessage = newerHandler;
+    ownedDisconnect();
+    expect(input.onmidimessage).toBe(newerHandler);
+  });
+
   it('throws when specified deviceId is not found', async () => {
     const inputs = new Map([['dev-1', { id: 'dev-1', onmidimessage: null }]]);
     vi.stubGlobal('navigator', {

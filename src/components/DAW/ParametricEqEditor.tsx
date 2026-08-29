@@ -142,8 +142,8 @@ export function ParametricEqEditor({
     window.addEventListener('pointercancel', finish);
   };
   return (
-    <section className="space-y-3" aria-label="Spectrum Parametric EQ editor" data-testid="parametric-eq-editor">
-      <div className="overflow-hidden rounded-lg border border-neutral-700 bg-neutral-950">
+    <section className="space-y-3" aria-label="Parametric EQ editor" data-testid="parametric-eq-editor">
+      <div className="overflow-hidden rounded-lg border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-950">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="img"
@@ -161,24 +161,25 @@ export function ParametricEqEditor({
             addBandAt(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
           }}
         >
-          <rect width={WIDTH} height={HEIGHT} fill="#09090b" pointerEvents="none" />
-          {[0, 0.25, 0.5, 0.75, 1].map(value => <line key={`h-${value}`} x1="0" x2={WIDTH} y1={value * HEIGHT} y2={value * HEIGHT} stroke="#27272a" pointerEvents="none" />)}
+          <rect data-testid="eq-background" width={WIDTH} height={HEIGHT} className="fill-white dark:fill-neutral-950" pointerEvents="none" />
+          {[0, 0.25, 0.5, 0.75, 1].map(value => <line key={`h-${value}`} x1="0" x2={WIDTH} y1={value * HEIGHT} y2={value * HEIGHT} className="stroke-neutral-200 dark:stroke-neutral-800" pointerEvents="none" />)}
           {[20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].map(frequency => (
             <g key={frequency} pointerEvents="none">
-              <line x1={eqFrequencyToX(frequency) * WIDTH} x2={eqFrequencyToX(frequency) * WIDTH} y1="0" y2={HEIGHT} stroke="#27272a" />
-              <text x={eqFrequencyToX(frequency) * WIDTH + 3} y={HEIGHT - 5} fill="#71717a" fontSize="11">{frequency >= 1000 ? `${frequency / 1000}k` : frequency}</text>
+              <line x1={eqFrequencyToX(frequency) * WIDTH} x2={eqFrequencyToX(frequency) * WIDTH} y1="0" y2={HEIGHT} className="stroke-neutral-200 dark:stroke-neutral-800" />
+              <text x={eqFrequencyToX(frequency) * WIDTH + 3} y={HEIGHT - 5} className="fill-neutral-500 dark:fill-neutral-400" fontSize="11">{frequency >= 1000 ? `${frequency / 1000}k` : frequency}</text>
             </g>
           ))}
-          {spectrumPath && <path data-testid="eq-spectrum-path" d={spectrumPath} fill="none" stroke="#0ea5e9" strokeOpacity="0.6" strokeWidth="1.5" pointerEvents="none" />}
-          <path data-testid="eq-response-path" d={responsePath} fill="none" stroke="#34d399" strokeWidth="3" pointerEvents="none" />
+          {spectrumPath && <path data-testid="eq-spectrum-path" d={spectrumPath} fill="none" className="stroke-sky-500 dark:stroke-sky-400" strokeOpacity="0.65" strokeWidth="1.5" pointerEvents="none" />}
+          <path data-testid="eq-response-path" d={responsePath} fill="none" className="stroke-emerald-600 dark:stroke-emerald-400" strokeWidth="3" pointerEvents="none" />
           {enabledBands.map(band => (
             <circle
               key={band.index}
               cx={eqFrequencyToX(band.frequency) * WIDTH}
               cy={eqGainToY(band.gain) * HEIGHT}
               r={selectedBand === band.index ? 9 : 7}
-              fill={selectedBand === band.index ? '#fbbf24' : '#10b981'}
-              stroke="white"
+              className={selectedBand === band.index
+                ? 'fill-amber-400 stroke-neutral-900 dark:stroke-white'
+                : 'fill-emerald-500 stroke-neutral-700 dark:stroke-white'}
               strokeWidth="2"
               role="button"
               tabIndex={0}

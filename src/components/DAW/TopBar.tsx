@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import * as Tone from 'tone';
-import { Play, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown, Timer, Zap } from 'lucide-react';
+import { Play, Pause, Square, Circle, Settings2, Download, Mic, LayoutGrid, Sliders, Undo2, Redo2, Repeat, Bell, ChevronDown, Timer, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDAWStore, useTemporalStore } from '../../store/dawStore';
 import { engine } from '../../lib/audioEngine';
+import { transportController } from '../../lib/transportCommands';
 import { Dropdown } from '../ui/Dropdown';
 import { MasterVisualizer } from './MasterVisualizer';
 import { createNewProject, deleteTemplate, saveProject, openProject, getRecentProjects, openRecentProject, RecentProject, saveAsTemplate, getTemplates, openTemplate, ProjectTemplate } from '../../lib/projectStorage';
@@ -25,17 +26,15 @@ export function TopBar() {
     getTemplates().then(setTemplates).catch(error => toast.error(`Failed to load templates: ${error instanceof Error ? error.message : String(error)}`));
   }, []);
 
-  const { projectName, tracks, selectedTrackId, isDirty, isPlaying, isRecording, isMicRecording, toggleMicRecording, togglePlay, stop, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, snapToGrid, setSnapToGrid, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome, arrangements, activeArrangementId, setArrangement, addArrangement, deleteArrangement } = useDAWStore(useShallow(state => ({
+  const { projectName, tracks, selectedTrackId, isDirty, transportStatus, isRecording, isMicRecording, toggleMicRecording, toggleRecording, bpm, setBpm, timeSignature, setTimeSignature, snapToGrid, setSnapToGrid, bottomPanel, setBottomPanel, theme, toggleTheme, setExportModalOpen, isLooping, toggleLoop, metronomeOn, toggleMetronome, arrangements, activeArrangementId, setArrangement, addArrangement, deleteArrangement } = useDAWStore(useShallow(state => ({
       projectName: state.projectName,
       tracks: state.tracks,
       selectedTrackId: state.selectedTrackId,
       isDirty: state.isDirty,
-      isPlaying: state.isPlaying,
+      transportStatus: state.transportStatus,
       isRecording: state.isRecording,
       isMicRecording: state.isMicRecording,
       toggleMicRecording: state.toggleMicRecording,
-      togglePlay: state.togglePlay,
-      stop: state.stop,
       toggleRecording: state.toggleRecording,
       bpm: state.bpm,
       setBpm: state.setBpm,
@@ -65,6 +64,7 @@ export function TopBar() {
   const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => state);
   
   const [showSettings, setShowSettings] = useState(false);
+  const [showProjectCenter, setShowProjectCenter] = useState(false);
   const [showMetronomeMenu, setShowMetronomeMenu] = useState(false);
   const [showTempoMap, setShowTempoMap] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
@@ -109,20 +109,11 @@ export function TopBar() {
   }, []);
 
   const handlePlay = async () => {
-    if (Tone.context.state !== 'running') {
-      await engine.initialize();
-    }
-    if (isPlaying) {
-      engine.pause();
-    } else {
-      engine.play();
-    }
-    togglePlay();
+    await transportController.togglePlayback();
   };
 
   const handleStop = () => {
-    engine.stop();
-    stop();
+    transportController.stopPlayback();
   };
 
   const handleExport = () => {
@@ -165,6 +156,7 @@ export function TopBar() {
             ariaLabel="Project menu"
             align="left"
             options={[
+              { value: 'project_center', label: 'Project Center…' },
               { value: 'new', label: 'New Project (Reset)' },
               { value: 'open', label: 'Open... (Ctrl+O)' },
               { value: 'save', label: 'Save (Ctrl+S)' },
@@ -186,6 +178,10 @@ export function TopBar() {
               }))
             ]}
             onChange={async (val) => {
+              if (val === 'project_center') {
+                setShowProjectCenter(true);
+                return;
+              }
               if (val === 'divider_recent' || val === 'divider_tpl') return;
               if (typeof val === 'string' && val.startsWith('delete_template_')) {
                 const idx = parseInt(val.replace('delete_template_', ''), 10);
@@ -286,13 +282,13 @@ export function TopBar() {
           </div>
           <div className="h-4 w-px bg-neutral-300 dark:bg-neutral-700 mx-1" />
           <Dropdown
-            ariaLabel="Arrangement"
+            ariaLabel="Project timeline"
             align="left"
             options={[
-              ...arrangements.map(a => ({ value: a.id, label: a.name })),
+              ...arrangements.map(a => ({ value: a.id, label: a.name.replace(/Arrangement/g, 'Timeline') })),
               { value: 'divider', label: '---' },
-              { value: 'new', label: 'New Arrangement...' },
-              ...(arrangements.length > 1 ? [{ value: 'delete_current', label: 'Delete Current Arrangement' }] : [])
+              { value: 'new', label: 'New Timeline...' },
+              ...(arrangements.length > 1 ? [{ value: 'delete_current', label: 'Delete Current Timeline' }] : [])
             ]}
             value={activeArrangementId || undefined}
             onChange={async (val) => {
@@ -300,11 +296,11 @@ export function TopBar() {
               if (val === 'delete_current') {
                 if (!activeArrangementId) return;
                 const decision = await requestDecision({
-                  title: 'Delete arrangement?',
-                  message: 'The current arrangement and all clips that belong to it will be deleted.',
+                  title: 'Delete timeline?',
+                  message: 'The current timeline and all clips that belong to it will be deleted.',
                   options: [
                     { id: 'cancel', label: 'Cancel', kind: 'secondary' },
-                    { id: 'delete', label: 'Delete arrangement', kind: 'danger' },
+                    { id: 'delete', label: 'Delete timeline', kind: 'danger' },
                   ],
                 });
                 if (decision?.choice === 'delete') deleteArrangement(activeArrangementId);
@@ -312,11 +308,11 @@ export function TopBar() {
               }
               if (val === 'new') {
                 const decision = await requestDecision({
-                  title: 'New arrangement',
-                  message: 'Create an empty arrangement or copy all clips from the current arrangement.',
+                  title: 'New timeline',
+                  message: 'Create an empty timeline or copy all clips from the current timeline.',
                   input: {
-                    label: 'Arrangement name',
-                    defaultValue: `Arrangement ${arrangements.length + 1}`,
+                    label: 'Timeline name',
+                    defaultValue: `Timeline ${arrangements.length + 1}`,
                   },
                   options: [
                     { id: 'cancel', label: 'Cancel', kind: 'secondary' },
@@ -333,7 +329,7 @@ export function TopBar() {
             }}
             trigger={
               <div className="flex items-center gap-1 hover:bg-neutral-200 dark:hover:bg-neutral-800 px-2 py-1 rounded transition-colors text-xs font-semibold cursor-pointer">
-                <span>{arrangements.find(a => a.id === activeArrangementId)?.name || 'Scene'}</span>
+                <span>Timeline · {(arrangements.find(a => a.id === activeArrangementId)?.name || 'Main').replace(/Arrangement/g, 'Timeline')}</span>
                 <ChevronDown size={12} className="opacity-70" />
               </div>
             }
@@ -371,11 +367,13 @@ export function TopBar() {
             <Square size={20} className="fill-neutral-600 dark:fill-neutral-300" />
           </button>
           <button 
-            className={`p-2 rounded transition-colors ${isPlaying ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
+            className={`p-2 rounded transition-colors ${transportStatus === 'playing' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            aria-label={transportStatus === 'playing' ? 'Pause' : 'Play'}
             onClick={handlePlay}
           >
-            <Play size={20} className={isPlaying ? 'fill-emerald-600 dark:fill-emerald-500' : 'fill-neutral-600 dark:fill-neutral-300'} />
+            {transportStatus === 'playing'
+              ? <Pause size={20} className="fill-emerald-600 dark:fill-emerald-500" />
+              : <Play size={20} className="fill-neutral-600 dark:fill-neutral-300" />}
           </button>
           <button 
             className={`p-2 rounded transition-colors ${isRecording ? 'bg-red-500/20 text-red-600 dark:text-red-500' : 'hover:bg-neutral-300 dark:hover:bg-neutral-700'} disabled:cursor-not-allowed disabled:opacity-40`}
@@ -618,7 +616,8 @@ export function TopBar() {
             <AutomationPanel onClose={() => setShowAutomation(false)} />
           </div>
         )}
-        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        {showSettings && <SettingsModal mode="settings" onClose={() => setShowSettings(false)} />}
+        {showProjectCenter && <SettingsModal mode="project" onClose={() => setShowProjectCenter(false)} />}
       </React.Suspense>
     </div>
   );

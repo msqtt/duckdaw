@@ -15,66 +15,104 @@ export class MicRecorder {
     nativeAnalyser: AnalyserNode | null = null;
     analyserData: Float32Array<ArrayBuffer> | null = null;
     startedAt = 0;
-    
-    private releaseInput() {
+    private startOperation = 0;
+
+    private releaseResources(
+        userMedia: Tone.UserMedia | null,
+        nativeStream: MediaStream | null,
+        nativeAnalyser: AnalyserNode | null,
+        inputMeter: Tone.Meter | null,
+    ) {
         try {
-            this.userMedia?.close();
+            userMedia?.close();
         } catch {
-            // Preserve the original recording error while continuing cleanup.
+            // Continue releasing the remaining resources.
         }
-        this.nativeStream?.getTracks().forEach(track => track.stop());
-        this.nativeAnalyser?.disconnect();
+        nativeStream?.getTracks().forEach(track => track.stop());
+        nativeAnalyser?.disconnect();
+        inputMeter?.dispose();
+    }
+
+    private releaseInput() {
+        this.releaseResources(this.userMedia, this.nativeStream, this.nativeAnalyser, this.inputMeter);
+        this.userMedia = null;
         this.nativeStream = null;
         this.nativeAnalyser = null;
         this.analyserData = null;
-        this.inputMeter?.dispose();
         this.inputMeter = null;
     }
 
     async start(deviceId?: string) {
+        const operation = ++this.startOperation;
+        let pendingUserMedia: Tone.UserMedia | null = null;
+        let pendingStream: MediaStream | null = null;
         try {
-            if (!this.userMedia) {
-                this.userMedia = new Tone.UserMedia();
-            }
-            // If a specific device is requested, use native getUserMedia with exact deviceId
+            let mediaRecorder: MediaRecorder;
+            let pendingMeter: Tone.Meter | null = null;
+            let pendingAnalyser: AnalyserNode | null = null;
+            let pendingAnalyserData: Float32Array<ArrayBuffer> | null = null;
+
             if (deviceId) {
-              const stream = await navigator.mediaDevices.getUserMedia({
+              pendingStream = await navigator.mediaDevices.getUserMedia({
                 audio: { deviceId: { exact: deviceId } },
               });
-              this.nativeStream = stream;
+              if (operation !== this.startOperation) {
+                pendingStream.getTracks().forEach(track => track.stop());
+                throw new DOMException('Microphone start was cancelled', 'AbortError');
+              }
               const ctx = Tone.getContext().rawContext as AudioContext;
-              const source = ctx.createMediaStreamSource(stream);
-              this.nativeAnalyser = ctx.createAnalyser();
-              this.nativeAnalyser.fftSize = 1024;
-              this.analyserData = new Float32Array(this.nativeAnalyser.fftSize);
+              const source = ctx.createMediaStreamSource(pendingStream);
+              pendingAnalyser = ctx.createAnalyser();
+              pendingAnalyser.fftSize = 1024;
+              pendingAnalyserData = new Float32Array(pendingAnalyser.fftSize);
               const dest = ctx.createMediaStreamDestination();
-              source.connect(this.nativeAnalyser);
+              source.connect(pendingAnalyser);
               source.connect(dest);
-              this.mediaRecorder = new MediaRecorder(dest.stream);
+              mediaRecorder = new MediaRecorder(dest.stream);
             } else {
-              await this.userMedia.open();
-              this.inputMeter?.dispose();
-              this.inputMeter = new Tone.Meter();
-              this.userMedia.connect(this.inputMeter);
-              // Connect to a destination that MediaRecorder can use
+              pendingUserMedia = new Tone.UserMedia();
+              await pendingUserMedia.open();
+              if (operation !== this.startOperation) {
+                pendingUserMedia.close();
+                throw new DOMException('Microphone start was cancelled', 'AbortError');
+              }
+              pendingMeter = new Tone.Meter();
+              pendingUserMedia.connect(pendingMeter);
               const dest = Tone.context.createMediaStreamDestination();
-              this.userMedia.connect(dest);
-              this.mediaRecorder = new MediaRecorder(dest.stream);
+              pendingUserMedia.connect(dest);
+              mediaRecorder = new MediaRecorder(dest.stream);
             }
 
-            this.chunks = [];
+            if (operation !== this.startOperation) {
+              pendingUserMedia?.close();
+              pendingStream?.getTracks().forEach(track => track.stop());
+              pendingAnalyser?.disconnect();
+              pendingMeter?.dispose();
+              throw new DOMException('Microphone start was cancelled', 'AbortError');
+            }
+
+            this.releaseInput();
+            this.userMedia = pendingUserMedia;
+            this.nativeStream = pendingStream;
+            this.nativeAnalyser = pendingAnalyser;
+            this.analyserData = pendingAnalyserData;
+            this.inputMeter = pendingMeter;
+            this.mediaRecorder = mediaRecorder;
+            const chunks: Blob[] = [];
+            this.chunks = chunks;
             this.startedAt = performance.now();
 
-            this.mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    this.chunks.push(e.data);
-                }
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
             };
-
-            this.mediaRecorder.start();
+            mediaRecorder.start();
         } catch (error) {
-            this.releaseInput();
-            this.mediaRecorder = null;
+            pendingUserMedia?.close();
+            pendingStream?.getTracks().forEach(track => track.stop());
+            if (operation === this.startOperation) {
+              this.releaseInput();
+              this.mediaRecorder = null;
+            }
             throw error;
         }
     }
@@ -93,6 +131,7 @@ export class MicRecorder {
     }
     
     async stop(): Promise<MicRecordingResult | null> {
+        this.startOperation += 1;
         return new Promise((resolve, reject) => {
             const mediaRecorder = this.mediaRecorder;
             if (!mediaRecorder || mediaRecorder.state === "inactive") {
@@ -102,21 +141,33 @@ export class MicRecorder {
                 return;
             }
 
+            const userMedia = this.userMedia;
+            const nativeStream = this.nativeStream;
+            const nativeAnalyser = this.nativeAnalyser;
+            const inputMeter = this.inputMeter;
+            const chunks = this.chunks;
+            const startedAt = this.startedAt;
+
+            this.mediaRecorder = null;
+            this.userMedia = null;
+            this.nativeStream = null;
+            this.nativeAnalyser = null;
+            this.analyserData = null;
+            this.inputMeter = null;
+
             mediaRecorder.onstop = () => {
                 const mimeType = mediaRecorder.mimeType || "audio/webm";
-                const blob = new Blob(this.chunks, { type: mimeType });
+                const blob = new Blob(chunks, { type: mimeType });
                 const url = URL.createObjectURL(blob);
-                const durationSeconds = Math.max(0.01, (performance.now() - this.startedAt) / 1000);
-                this.releaseInput();
-                this.mediaRecorder = null;
+                const durationSeconds = Math.max(0.01, (performance.now() - startedAt) / 1000);
+                this.releaseResources(userMedia, nativeStream, nativeAnalyser, inputMeter);
                 resolve({ url, mimeType, durationSeconds });
             };
 
             try {
                 mediaRecorder.stop();
             } catch (error) {
-                this.releaseInput();
-                this.mediaRecorder = null;
+                this.releaseResources(userMedia, nativeStream, nativeAnalyser, inputMeter);
                 reject(error);
             }
         });

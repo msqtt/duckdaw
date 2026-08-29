@@ -18,13 +18,26 @@ async function installUnsupportedApiFallbacks(page: Page) {
 
 async function installRecordingApiMocks(
   page: Page,
-  options: { countInBars?: 0 | 1 | 2 | 4; rejectCapture?: boolean } = {},
+  options: {
+    countInBars?: 0 | 1 | 2 | 4;
+    rejectCapture?: boolean;
+    midiAccessDelayMs?: number;
+    midiAccessDelaysMs?: number[];
+    audioAccessDelayMs?: number;
+  } = {},
 ) {
-  const config = { countInBars: options.countInBars ?? 0, rejectCapture: options.rejectCapture ?? false };
-  await page.addInitScript(({ countInBars, rejectCapture }) => {
+  const config = {
+    countInBars: options.countInBars ?? 0,
+    rejectCapture: options.rejectCapture ?? false,
+    midiAccessDelayMs: options.midiAccessDelayMs ?? 0,
+    midiAccessDelaysMs: options.midiAccessDelaysMs ?? [],
+    audioAccessDelayMs: options.audioAccessDelayMs ?? 0,
+  };
+  await page.addInitScript(({ countInBars, rejectCapture, midiAccessDelayMs, midiAccessDelaysMs, audioAccessDelayMs }) => {
     localStorage.setItem('duckdaw_countin_bars', String(countInBars));
     const mediaDevices = {
       getUserMedia: async () => {
+        if (audioAccessDelayMs > 0) await new Promise(resolve => setTimeout(resolve, audioAccessDelayMs));
         if (rejectCapture) throw new DOMException('Permission denied', 'NotAllowedError');
         const AudioContextConstructor = window.AudioContext
           ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -41,6 +54,17 @@ async function installRecordingApiMocks(
     };
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: mediaDevices });
 
+    const midiInput = { id: 'mock-midi-input', onmidimessage: null as ((event: { data: Uint8Array }) => void) | null };
+    (window as unknown as { __mockMidiInput: typeof midiInput }).__mockMidiInput = midiInput;
+    let midiRequestIndex = 0;
+    Object.defineProperty(navigator, 'requestMIDIAccess', {
+      configurable: true,
+      value: async () => {
+        const delay = midiAccessDelaysMs[midiRequestIndex++] ?? midiAccessDelayMs;
+        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        return { inputs: new Map([['mock-midi-input', midiInput]]) };
+      },
+    });
     class MockMediaRecorder {
       state: RecordingState = 'inactive';
       mimeType = 'audio/webm;codecs=opus';
@@ -94,6 +118,12 @@ async function openSettings(page: Page) {
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
 }
 
+async function openProjectCenter(page: Page) {
+  await page.getByRole('button', { name: 'Project menu' }).click();
+  await page.getByRole('option', { name: 'Project Center…' }).click();
+  await expect(page.getByRole('dialog', { name: 'Project Center' })).toBeVisible();
+}
+
 test('PLUG-E2E-01 uses Track instrument selection and a right-side Inspector for ordered Mixer effects', async ({ page }) => {
   await openApp(page);
   await newProject(page);
@@ -135,33 +165,203 @@ test('PLUG-E2E-01 uses Track instrument selection and a right-side Inspector for
   await expect(chainItems.nth(0)).toHaveAttribute('data-plugin-id', 'duckdaw.effect.chorus');
 });
 
+
+
+test('PLUG-E2E-02 keeps an existing MIDI schedule audible after instrument hot-swap', async ({ page }) => {
+  test.setTimeout(75_000);
+  await openApp(page);
+  await newProject(page);
+  await addTrack(page, 'midi');
+  await addClip(page, 'midi');
+  await page.getByTestId('clip-item').dblclick({ position: { x: 20, y: 50 } });
+  const pianoGrid = page.getByTestId('piano-grid');
+  for (const x of [35, 95, 155, 215, 275, 335]) await pianoGrid.click({ position: { x, y: 110 } });
+  await expect(page.getByTestId('piano-note')).toHaveCount(6);
+  const sustainedNote = page.getByTestId('piano-note').first();
+  const noteResizeHandle = sustainedNote.locator('div').first();
+  const resizeBox = await noteResizeHandle.boundingBox();
+  if (!resizeBox) throw new Error('MIDI note resize handle is not measurable');
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2 + 120, resizeBox.y + resizeBox.height / 2);
+  await page.mouse.up();
+  await expect.poll(async () => (await sustainedNote.boundingBox())?.width ?? 0).toBeGreaterThan(100);
+  await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  await page.getByRole('button', { name: 'Show mixer route' }).click();
+  await page.getByLabel('New bus name').fill('Hot Swap Monitor');
+  await page.getByRole('button', { name: 'Add Bus' }).click();
+  const busInput = page.getByRole('button', { name: 'Hot Swap Monitor IN routing port' });
+  const busId = (await busInput.getAttribute('data-routing-port'))!.split(':')[1];
+  await page.getByRole('button', { name: 'Inst 1 OUT routing port' }).click();
+  await busInput.click();
+
+  const meter = page.locator(`[data-testid="bus-meter-level"][data-bus-id="${busId}"]`);
+  await page.getByRole('button', { name: 'Toggle cycle mode' }).click();
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(() => meter.evaluate(element => Number.parseFloat(element.style.height) || 0), {
+    timeout: 20_000,
+    intervals: [20, 50, 100],
+  }).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Stop' }).click();
+
+  await page.getByLabel('Instrument for Inst 1').selectOption('duckdaw.instrument.bass');
+  await meter.evaluate(element => { element.style.height = '0%'; });
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(() => meter.evaluate(element => Number.parseFloat(element.style.height) || 0), {
+    timeout: 20_000,
+    intervals: [20, 50, 100],
+  }).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Stop' }).click();
+});
+
+test('TRN-E2E-07 shows truthful Play/Pause glyphs and keeps idle Stop stable', async ({ page }) => {
+  await openApp(page);
+  const transportTime = page.getByTestId('transport-time');
+  const initialTime = await transportTime.textContent();
+  const play = page.getByRole('button', { name: 'Play' });
+  await expect(play.locator('svg')).toHaveClass(/lucide-play/);
+  await play.click();
+  const pause = page.getByRole('button', { name: 'Pause' });
+  await expect(pause.locator('svg')).toHaveClass(/lucide-pause/);
+  await pause.click();
+  await expect(page.getByRole('button', { name: 'Play' }).locator('svg')).toHaveClass(/lucide-play/);
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(transportTime).toHaveText(initialTime ?? '0:00:000');
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(transportTime).toHaveText(initialTime ?? '0:00:000');
+});
+
+test('WORKSPACE-E2E-01 resizes Inspector/Track, discloses Route, themes EQ, and centralizes Project', async ({ page }) => {
+  test.setTimeout(45_000);
+  await openApp(page);
+  await newProject(page);
+  await addTrack(page, 'midi');
+  await page.getByRole('button', { name: 'Open instrument details for Inst 1' }).click();
+
+  const inspector = page.getByRole('complementary', { name: 'Plugin Inspector' });
+  const inspectorWidth = (await inspector.boundingBox())!.width;
+  const inspectorResize = page.getByRole('separator', { name: 'Resize plugin inspector' });
+  await inspectorResize.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await inspector.boundingBox())!.width).toBeGreaterThan(inspectorWidth);
+  await page.getByRole('button', { name: 'Maximize plugin inspector' }).click();
+  await expect(inspector).toHaveAttribute('data-maximized', 'true');
+  await page.getByRole('button', { name: 'Restore plugin inspector' }).click();
+  await page.getByRole('button', { name: 'Close plugin inspector' }).click();
+
+  await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  await expect(page.getByRole('region', { name: 'Visual mixer routing' })).toHaveCount(0);
+  const routeToggle = page.getByRole('button', { name: 'Show mixer route' });
+  await expect(routeToggle).toHaveAttribute('aria-expanded', 'false');
+  await routeToggle.click();
+  await expect(page.getByRole('region', { name: 'Visual mixer routing' })).toBeVisible();
+  await page.getByRole('button', { name: 'Expand mixer route' }).click();
+  await expect(page.getByRole('region', { name: 'Visual mixer routing' })).toHaveAttribute('data-expanded', 'true');
+  await page.getByRole('button', { name: 'Restore mixer route' }).click();
+
+  const channel = page.getByTestId('mixer-channel');
+  const channelWidth = (await channel.boundingBox())!.width;
+  const channelResize = page.getByRole('separator', { name: 'Resize mixer channel Inst 1' });
+  await channelResize.focus();
+  await page.keyboard.press('End');
+  await expect.poll(async () => (await channel.boundingBox())!.width).toBeGreaterThan(channelWidth);
+
+  await channel.getByLabel('Add effect to Inst 1').selectOption('duckdaw.effect.parametric-eq');
+  await expect(inspector.getByRole('heading', { name: 'Parametric EQ' })).toBeVisible();
+  const eqBackground = inspector.getByTestId('eq-background');
+  await openSettings(page);
+  await page.getByTitle('Dark Theme').click();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  const darkFill = await eqBackground.evaluate(element => getComputedStyle(element).fill);
+  await openSettings(page);
+  await page.getByTitle('Light Theme').click();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect.poll(() => eqBackground.evaluate(element => getComputedStyle(element).fill)).not.toBe(darkFill);
+  await page.getByRole('button', { name: 'Close plugin inspector' }).click();
+
+  await page.getByRole('button', { name: 'Project menu' }).click();
+  await page.getByRole('option', { name: 'Project Center…' }).click();
+  const projectCenter = page.getByRole('dialog', { name: 'Project Center' });
+  await expect(projectCenter.getByRole('heading', { name: 'New Project' })).toBeVisible();
+  await expect(projectCenter.getByRole('heading', { name: 'Recent Projects' })).toBeVisible();
+  await expect(projectCenter.getByRole('heading', { name: 'Local Project' })).toBeVisible();
+  await expect(projectCenter.getByRole('heading', { name: 'GitHub Sync' })).toBeVisible();
+  await projectCenter.getByRole('button', { name: 'Close project center' }).click();
+
+  await expect(page.getByRole('button', { name: 'Arrangement' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Project timeline' })).toBeVisible();
+  await openSettings(page);
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings.getByRole('heading', { name: 'Local Project' })).toHaveCount(0);
+  await expect(settings.getByRole('heading', { name: 'GitHub Sync' })).toHaveCount(0);
+});
 test('E2E-01 new → edit → download save → reload package', async ({ page }, testInfo) => {
   await openApp(page);
   await newProject(page);
   await addTrack(page, 'midi');
   await addClip(page, 'midi');
 
-  await openSettings(page);
+  await openProjectCenter(page);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Save File' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('project.duckdaw');
   const packagePath = testInfo.outputPath('project.duckdaw');
   await download.saveAs(packagePath);
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('button', { name: 'Close project center' }).click();
 
   const addTrackMenu = page.getByText('Add Track', { exact: true });
   await addTrackMenu.click();
   await page.getByRole('option', { name: 'Audio Track' }).click();
   await expect(page.getByTestId('track-header')).toHaveCount(2);
 
-  await openSettings(page);
+  await openProjectCenter(page);
   await page.locator('input[accept=".json,.duckdaw,.zip"]').setInputFiles(packagePath!);
   const discard = page.getByRole('dialog', { name: /Discard unsaved changes/i });
   await expect(discard).toBeVisible();
   await discard.getByRole('button', { name: /Discard/i }).click();
   await expect(page.getByTestId('track-header')).toHaveCount(1);
   await expect(page.getByTestId('clip-item')).toHaveCount(1);
+});
+
+test('PROJ-E2E-09 stops runtime playback before replacing the active Project', async ({ page }) => {
+  await openApp(page);
+  await newProject(page);
+  await addTrack(page, 'midi');
+
+  const transportTime = page.getByTestId('transport-time');
+  const initialTime = await transportTime.textContent();
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(() => transportTime.textContent()).not.toBe(initialTime);
+  await newProject(page);
+
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect.poll(() => transportTime.textContent()).toBe(initialTime);
+});
+
+test('PROJ-E2E-09 cancels active MIDI count-in before replacing the Project', async ({ page }) => {
+  await installRecordingApiMocks(page, { countInBars: 4 });
+  await page.goto('/');
+  await expect(page.getByText('DuckDAW', { exact: false }).first()).toBeVisible();
+  await newProject(page);
+  await addTrack(page, 'midi');
+
+  const transportTime = page.getByTestId('transport-time');
+  const initialTime = await transportTime.textContent();
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(() => transportTime.textContent()).not.toBe(initialTime);
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.getByRole('button', { name: 'Start MIDI recording' }).click();
+  await expect(page.getByRole('status').filter({ hasText: /^Count-in:/ })).toBeVisible();
+  await newProject(page);
+
+  await expect(page.getByRole('status').filter({ hasText: /^Count-in:/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect(transportTime).toHaveText(initialTime ?? '0:00:000');
+  await expect(page.getByTestId('empty-state-cta')).toBeVisible();
+  await page.waitForTimeout(1_200);
+  await expect(transportTime).toHaveText(initialTime ?? '0:00:000');
+  await expect(page.getByTestId('clip-item')).toHaveCount(0);
 });
 
 test('E2E-02 undo/redo and Audio reverse are single browser-visible transactions', async ({ page }) => {
@@ -244,6 +444,7 @@ test('MIX-E2E-03 patches visual ports, creates a Bus channel, and edits Spectrum
   }
   await expect(page.getByTestId('piano-note')).toHaveCount(4);
   await page.getByRole('button', { name: 'Toggle mixer' }).click();
+  await page.getByRole('button', { name: 'Show mixer route' }).click();
   await page.getByRole('button', { name: 'Full screen mixer' }).click();
   await page.getByRole('button', { name: 'Zoom in routing' }).click();
   await expect(page.getByText('110%', { exact: true })).toBeVisible();
@@ -265,6 +466,7 @@ test('MIX-E2E-03 patches visual ports, creates a Bus channel, and edits Spectrum
   await expect(trackOutput).toHaveAttribute('data-routing-edge', new RegExp(`:${busId}$`));
 
   await page.getByRole('button', { name: 'Solo Inst 1' }).click();
+  await page.getByRole('button', { name: 'Toggle cycle mode' }).click();
   await page.getByRole('button', { name: 'Play' }).click();
   const busMeter = page.locator(`[data-testid="bus-meter-level"][data-bus-id="${busId}"]`);
   await expect.poll(async () => busMeter.evaluate(element => Number.parseFloat(element.style.height) || 0), { timeout: 10_000 }).toBeGreaterThan(0);
@@ -283,7 +485,7 @@ test('MIX-E2E-03 patches visual ports, creates a Bus channel, and edits Spectrum
   await expect(busChannel).toBeVisible();
   await busChannel.getByLabel('Add effect to Music Group').selectOption('duckdaw.effect.parametric-eq');
   const inspector = page.getByRole('complementary', { name: 'Plugin Inspector' });
-  await expect(inspector.getByRole('heading', { name: 'Spectrum Parametric EQ' })).toBeVisible();
+  await expect(inspector.getByRole('heading', { name: 'Parametric EQ' })).toBeVisible();
   const eq = inspector.getByTestId('parametric-eq-editor');
   await expect(eq.getByTestId('eq-response-path')).toHaveAttribute('d', /^M /);
   await expect(eq.getByTestId('eq-spectrum-path')).toHaveCount(0);
@@ -384,6 +586,94 @@ test('REC-E2E-05 cancelling count-in restores stopped playback and prevents dela
   await expect(page.locator('[data-testid="clip-item"][data-clip-type="audio"]')).toHaveCount(0);
 });
 
+test('REC-E2E-05 cancelling MIDI count-in restores stopped playback and prevents delayed capture', async ({ page }) => {
+  await installRecordingApiMocks(page, { countInBars: 4 });
+  await page.goto('/');
+  await expect(page.getByText('DuckDAW', { exact: false }).first()).toBeVisible();
+  await newProject(page);
+  await addTrack(page, 'midi');
+
+  const transportTime = page.getByTestId('transport-time');
+  const initialTime = await transportTime.textContent();
+  await page.getByRole('button', { name: 'Start MIDI recording' }).click();
+  await expect(page.getByRole('status').filter({ hasText: /^Count-in:/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect.poll(() => transportTime.textContent()).not.toBe(initialTime);
+  await page.getByRole('button', { name: 'Stop MIDI recording' }).click();
+
+  await expect(page.getByRole('status').filter({ hasText: /^Count-in:/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect.poll(() => transportTime.textContent()).toBe(initialTime);
+  await page.waitForTimeout(2_200);
+  await expect(page.getByRole('button', { name: 'Start MIDI recording' })).toBeVisible();
+  await expect(page.getByTestId('clip-item')).toHaveCount(0);
+});
+
+test('REC-E2E-05 ignores a late Web MIDI connection after recording is cancelled', async ({ page }) => {
+  await installRecordingApiMocks(page, { midiAccessDelayMs: 800 });
+  await page.goto('/');
+  await expect(page.getByText('DuckDAW', { exact: false }).first()).toBeVisible();
+  await newProject(page);
+  await addTrack(page, 'midi');
+
+  await page.getByRole('button', { name: 'Start MIDI recording' }).click();
+  await page.getByRole('button', { name: 'Stop MIDI recording' }).click();
+  await page.waitForTimeout(1_200);
+
+  await expect(page.getByRole('button', { name: 'Start MIDI recording' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect(page.getByTestId('clip-item')).toHaveCount(0);
+});
+
+test('PROJ-E2E-09 keeps a re-armed MIDI input when the old permission resolves last', async ({ page }) => {
+  await installRecordingApiMocks(page, { midiAccessDelaysMs: [1_000, 100] });
+  await page.goto('/');
+  await expect(page.getByText('DuckDAW', { exact: false }).first()).toBeVisible();
+  await newProject(page);
+  await addTrack(page, 'midi');
+
+  await page.getByRole('button', { name: 'Start MIDI recording' }).click();
+  await newProject(page);
+  await addTrack(page, 'midi');
+  await page.getByRole('button', { name: 'Start MIDI recording' }).click();
+  await page.waitForTimeout(1_200);
+  await page.evaluate(() => {
+    const input = (window as unknown as {
+      __mockMidiInput: { onmidimessage: ((event: { data: Uint8Array }) => void) | null };
+    }).__mockMidiInput;
+    if (!input.onmidimessage) throw new Error('New Project MIDI handler was disconnected');
+    input.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+  });
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    const input = (window as unknown as {
+      __mockMidiInput: { onmidimessage: ((event: { data: Uint8Array }) => void) | null };
+    }).__mockMidiInput;
+    input.onmidimessage?.({ data: new Uint8Array([0x80, 60, 0]) });
+  });
+  await page.getByRole('button', { name: 'Stop MIDI recording' }).click();
+
+  await expect(page.locator('[data-testid="clip-item"][data-clip-type="midi"]')).toHaveCount(1);
+});
+
+test('PROJ-E2E-09 keeps a re-armed microphone recording owned by the new Project', async ({ page }) => {
+  await installRecordingApiMocks(page, { audioAccessDelayMs: 800 });
+  await page.goto('/');
+  await expect(page.getByText('DuckDAW', { exact: false }).first()).toBeVisible();
+  await newProject(page);
+  await addTrack(page, 'audio');
+
+  await page.getByRole('button', { name: 'Start microphone recording' }).click();
+  await newProject(page);
+  await addTrack(page, 'audio');
+  await page.getByRole('button', { name: 'Start microphone recording' }).click();
+  await page.waitForTimeout(1_200);
+  await expect(page.getByRole('button', { name: 'Stop microphone recording' })).toBeVisible();
+  await page.getByRole('button', { name: 'Stop microphone recording' }).click();
+
+  await expect(page.locator('[data-testid="clip-item"][data-clip-type="audio"]')).toHaveCount(1);
+});
+
 test('E2E-03 unsupported FSA, Web MIDI, and microphone APIs use visible fallbacks', async ({ page }) => {
   await openApp(page);
   await openSettings(page);
@@ -391,6 +681,8 @@ test('E2E-03 unsupported FSA, Web MIDI, and microphone APIs use visible fallback
 
   await expect(page.getByText('Web MIDI API not supported by this browser')).toBeVisible();
   await expect(page.getByText('getUserMedia not supported')).toBeVisible();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await openProjectCenter(page);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Save File' }).click();
   const download = await downloadPromise;

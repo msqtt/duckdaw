@@ -16,7 +16,15 @@ const curve = (fromX: number, fromY: number, toX: number, toY: number) => {
   return `M ${fromX} ${fromY} C ${fromX + control} ${fromY}, ${toX - control} ${toY}, ${toX} ${toY}`;
 };
 
-export function RoutingGraph() {
+export function RoutingGraph({
+  expanded = false,
+  zoom,
+  onZoomChange,
+}: {
+  expanded?: boolean;
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
+}) {
   const { tracks, buses, sends, addBus, connectRoutingPort, deleteSend } = useDAWStore(useShallow(state => ({
     tracks: state.tracks,
     buses: state.buses,
@@ -27,7 +35,6 @@ export function RoutingGraph() {
   })));
   const [pending, setPending] = useState<RoutingSourcePort | null>(null);
   const [busName, setBusName] = useState('');
-  const [zoom, setZoom] = useState(1);
   const pendingRef = useRef<RoutingSourcePort | null>(null);
   const [message, setMessage] = useState('Choose OUT, PRE, or POST, then connect it to a Bus IN.');
   const rootBusId = buses.find(bus => bus.outputBusId == null)?.id;
@@ -93,13 +100,18 @@ export function RoutingGraph() {
   };
 
   return (
-    <section className="border-b border-neutral-300 bg-neutral-100 p-2 text-[10px] dark:border-neutral-800 dark:bg-neutral-900" aria-label="Visual mixer routing">
+    <section
+      id="mixer-routing-workspace"
+      data-expanded={expanded ? 'true' : 'false'}
+      className={`${expanded ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'} border-b border-neutral-300 bg-neutral-100 p-2 text-[10px] dark:border-neutral-800 dark:bg-neutral-900`}
+      aria-label="Visual mixer routing"
+    >
       <div className="mb-1 flex items-center justify-between gap-2">
         <strong>ROUTING PATCH</strong>
         <div className="flex items-center gap-0.5" aria-label="Routing zoom controls">
-          <button type="button" aria-label="Zoom out routing" onClick={() => setZoom(value => Math.max(0.7, value - 0.1))} className="h-6 rounded border px-1">−</button>
+          <button type="button" aria-label="Zoom out routing" onClick={() => onZoomChange(zoom - 0.1)} className="h-6 rounded border px-1">−</button>
           <span className="w-9 text-center font-mono text-[9px]">{Math.round(zoom * 100)}%</span>
-          <button type="button" aria-label="Zoom in routing" onClick={() => setZoom(value => Math.min(1.5, value + 0.1))} className="h-6 rounded border px-1">+</button>
+          <button type="button" aria-label="Zoom in routing" onClick={() => onZoomChange(zoom + 0.1)} className="h-6 rounded border px-1">+</button>
         </div>
         <form className="flex items-center gap-1" onSubmit={event => { event.preventDefault(); if (!busName.trim()) return; addBus(busName); setBusName(''); }}>
           <label className="sr-only" htmlFor="routing-new-bus">New bus name</label>
@@ -108,7 +120,7 @@ export function RoutingGraph() {
         </form>
         <span role="status" aria-live="polite" className="min-w-0 flex-1 truncate text-right text-[9px] text-neutral-500">{message}</span>
       </div>
-      <div className="max-h-56 overflow-auto rounded border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-950">
+      <div className={`${expanded ? 'min-h-0 flex-1' : 'max-h-56'} overflow-auto rounded border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-950`}>
         <div className="relative" style={{ width: 850 * zoom, height: height * zoom }} data-testid="routing-canvas">
           <svg viewBox={`0 0 850 ${height}`} preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
             {tracks.flatMap(track => {

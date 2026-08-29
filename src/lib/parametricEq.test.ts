@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createBuiltInPluginRegistry } from './builtinPlugins';
 import {
   EQ_BAND_COUNT,
   createDefaultEqParameters,
@@ -47,5 +48,23 @@ describe('PLUG-EQ-01 parametric EQ domain', () => {
     expect(eqXToFrequency(2)).toBe(20000);
     expect(eqYToGain(-1)).toBe(24);
     expect(eqYToGain(2)).toBe(-24);
+  });
+
+  it('uses the compact display name without changing the stable plugin or parameter identities', () => {
+    const definition = createBuiltInPluginRegistry().get('duckdaw.effect.parametric-eq');
+    expect(definition).toMatchObject({
+      id: 'duckdaw.effect.parametric-eq',
+      version: '1.0.0',
+      kind: 'effect',
+      name: 'Parametric EQ',
+    });
+    expect(definition?.parameters.map(parameter => parameter.id)).toEqual(
+      Array.from({ length: 8 }, (_, index) => [
+        `band${index + 1}Enabled`,
+        `band${index + 1}Frequency`,
+        `band${index + 1}Gain`,
+        `band${index + 1}Q`,
+      ]).flat(),
+    );
   });
 });

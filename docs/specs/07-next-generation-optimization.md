@@ -305,6 +305,24 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 
 边界合同：连接候选必须先经 `validateRoutingGraph`，非法/环/重复连接零提交；有效连接和 EQ 单手势各一个 undo step。频谱 API 缺失时只隐藏动态 spectrum，不 bypass EQ。格式保持 `2.1.0`，EQ 仅使用现有 number descriptor，旧/未知 descriptor 往返规则不变。浏览器验收覆盖 pointer 与键盘端口连接、Bus 新建/聚合/挂 EQ、点增删拖拽、undo/redo、Solo 经 Bus 发声及 unsupported analyser fallback。
 
+### Batch I：Workspace coherence 与 runtime continuity（格式保持 2.1）
+
+状态：**已实现并通过本地门禁（2026-08-24）**。本批所有布局、transport runtime 与 Project Center 状态均为 session state，不改变 `.duckdaw` 2.1.0。
+
+| ID | 需求 | 核心测试 |
+|---|---|---|
+| PLUG-INST-02 | MIDI 既有 Part 在 instrument 热切换后动态命中当前实例，失败 fallback 且旧实例释放 | `PLUG-T13~15`, `PLUG-E2E-02` |
+| PLUG-UI-02 | Plugin Inspector pointer/keyboard 调宽与应用工作区 Maximize/Restore | `PLUG-UI-T02-01/02`, `PLUG-E2E-03` |
+| MIX-ROUTE-04 | Route 默认关闭、Mixer 内开关与 Expand/Restore，graph/zoom/undo 不变 | `MIX-ROUTE-T04-01/02`, `MIX-E2E-04` |
+| MIX-UI-01 | 每个 Track strip session-only 独立调宽，保持横向滚动与 sticky Master | `MIX-UI-T01-01/02`, `MIX-E2E-05` |
+| PLUG-EQ-02 | `Parametric EQ` compact display 与 Light/Dark/System 图形 token | `PLUG-EQ-T04/05`, `PLUG-EQ-E2E-02` |
+| FR-TRN-07 | stopped/playing/paused 真值、idle Stop 音频 no-op 与 Play/Pause glyph 一致 | `TRN-T07-01~04`, `TRN-E2E-07` |
+| FR-PROJ-09 | 单一 Project Center：New、Recent、Local、GitHub；统一原子来源事务 | `PROJ-T09-01~07`, `PROJ-E2E-09` |
+
+边界合同：Project 是唯一顶层文件/同步概念，Arrangement 仅为 Project 内时间线及兼容 schema；Recent 不代表版本历史。Resize/expanded/width/source提示不 dirty、不 undo、不 recovery。所有 open/load 失败必须保留当前 Project 与来源绑定；插件/transport 实际调用链必须由动态 runtime 与浏览器 meter 证明，静态文案测试不能替代。
+
+本地完成证据（2026-08-24）：完整 Vitest 55 files / 353 tests；TypeScript、production build、audit、bundle 与 diff-check 通过；DAWApp 约 351.19/400 KiB、Tone 267.44/300、React 189.40/220、ExportModal 20/40。Playwright 覆盖 Chromium/Firefox/WebKit 的 hot-swap、workspace、Project replacement、MIDI/Mic old-after-new ownership 与 fallback；独立真实调用链最终签核 **无 P0/P1**。
+
 ### Batch F：GitHub、E2E、CI/CD 与发布
 
 | ID | 需求 | 核心测试/门禁 |
@@ -354,3 +372,4 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | F E2E/CI/CD/Release | 已实现并验证：GitHub baseline SHA/409 四路原子事务；exact 依赖与 0 audit；Chromium/Firefox/WebKit 18/18 产品 E2E；axe serious/critical；CI、Netlify staging context、部署 metadata、staging smoke 与 manual release workflow；FFmpeg notice/GPL/source 随部署并由 smoke 验证 | 2.0.0 | 0.3.0-rc.1 |
 | G Browser Plugin SDK | 核心与 PLUG-UI-01 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | 2.1.0 | 0.4.0 |
 | H 通用控件 Automation | AUTO-02 已实现；domain/store/audio/package、三浏览器真实控件→曲线→plugin→offline 路径及独立复审全部通过，无 P0/P1 | 2.1.0 optional extension | 0.4.0 |
+| I Workspace coherence/runtime continuity | 规格已冻结，待按 TDD 实现：MIDI instrument 热切换、Inspector/Route/Mixer 尺寸、EQ 主题、transport 真值与统一 Project Center | 2.1.0（无 schema 变化） | 0.4.0 |

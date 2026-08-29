@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import { useStore } from 'zustand';
+import { shallow } from 'zustand/shallow';
 import { temporal } from 'zundo';
 import { createDefaultAudioEdit, setClipFadeValue, setClipGainValue, splitClip, toggleClipReverseValue, trimClipEndValue, trimClipStartValue } from '../lib/audioEditing';
 import { transformNotes } from '../lib/midiEditing';
@@ -7,6 +8,7 @@ import { type TempoPoint, validateTempoMap, createDefaultTempoMap } from '../lib
 import { type AutomationPoint, type AutomationLane, type AutomationTarget, type AutomationCurve, type AutomationBinding, normalizeAutomationLane } from '../lib/automation';
 import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from '../lib/routingGraph';
 import { planRoutingConnection, type RoutingSourcePort } from '../lib/routingPatch';
+import type { TransportStatus } from '../lib/transportController';
 
 import {
   legacyEffectToPluginDescriptor,
@@ -138,6 +140,7 @@ export interface PersistedProjectState {
 
 export interface DAWState extends PersistedProjectState {
   theme: ThemeMode;
+  transportStatus: TransportStatus;
   isPlaying: boolean;
   snapGridSize: number;
   snapToGrid: boolean;
@@ -164,6 +167,7 @@ export interface DAWState extends PersistedProjectState {
   setZoom: (zoom: number) => void;
   setSnapGridSize: (size: number) => void;
   setSnapToGrid: (snap: boolean) => void;
+  setTransportStatus: (status: TransportStatus) => void;
   togglePlay: () => void;
   stop: () => void;
   toggleLoop: () => void;
@@ -178,7 +182,7 @@ export interface DAWState extends PersistedProjectState {
   setPanelHeight: (height: number) => void;
   setPanelFullScreen: (fs: boolean) => void;
   setExportModalOpen: (open: boolean) => void;
-  loadProject: (data: Partial<PersistedProjectState>) => void;
+  loadProject: (data: Partial<PersistedProjectState>) => boolean;
   getProjectData: () => PersistedProjectState;
   addTrack: (type: TrackType) => void;
   deleteTrack: (id: string) => void;
@@ -287,6 +291,7 @@ export const dawStore = createStore<DAWState>()(
       isDirty: false,
       lastNoteDuration: 0.5,
       theme: getInitialTheme(),
+      transportStatus: 'stopped',
       isPlaying: false,
       isLooping: false,
       snapGridSize: 0.25,
@@ -468,7 +473,9 @@ export const dawStore = createStore<DAWState>()(
         }
         return { theme: newTheme! };
       }),
-      loadProject: (data) => set((state) => {
+      loadProject: (data) => {
+        let loaded = false;
+        set((state) => {
         const arrangements = data.arrangements?.length
           ? data.arrangements
           : [{ id: 'main', name: 'Main Arrangement' }];
@@ -535,6 +542,7 @@ export const dawStore = createStore<DAWState>()(
         }
 
         revokeUnusedBlobUrls([...state.clips, ...state.clipboardClips], clips);
+        loaded = true;
 
         return {
           projectId: data.projectId ?? crypto.randomUUID(),
@@ -558,6 +566,7 @@ export const dawStore = createStore<DAWState>()(
           tempoTrack,
           buses,
           sends,
+          transportStatus: 'stopped',
           isPlaying: false,
           isRecording: false,
           isMicRecording: false,
@@ -569,7 +578,9 @@ export const dawStore = createStore<DAWState>()(
           exportModalOpen: false,
           isDirty: false,
         };
-      }),
+        });
+        return loaded;
+      },
       getProjectData: () => {
         const state = get();
         return {
@@ -619,8 +630,12 @@ export const dawStore = createStore<DAWState>()(
           sends: state.sends,
         };
       },
-      togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      stop: () => set({ isPlaying: false, isRecording: false, isMicRecording: false }),
+      setTransportStatus: (transportStatus) => set({ transportStatus, isPlaying: transportStatus === 'playing' }),
+      togglePlay: () => set((state) => {
+        const transportStatus: TransportStatus = state.transportStatus === 'playing' ? 'paused' : 'playing';
+        return { transportStatus, isPlaying: transportStatus === 'playing' };
+      }),
+      stop: () => set({ transportStatus: 'stopped', isPlaying: false, isRecording: false, isMicRecording: false }),
       addTrack: (type) => set((state) => {
         const id = generateId();
         const env = type === 'midi' ? { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 } : undefined;
@@ -1316,6 +1331,7 @@ export const dawStore = createStore<DAWState>()(
         buses: state.buses,
         sends: state.sends,
       }),
+      equality: shallow,
     }
   )
 );

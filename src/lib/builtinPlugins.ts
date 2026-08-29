@@ -42,7 +42,10 @@ const text = (parameters: Record<string, PluginParameterValue>, key: string, fal
   typeof parameters[key] === 'string' ? parameters[key] as string : fallback;
 
 function createInstrumentInstance(
-  node: Tone.ToneAudioNode & { triggerAttackRelease: (...args: any[]) => unknown },
+  node: Tone.ToneAudioNode & {
+    triggerAttackRelease: (...args: any[]) => unknown;
+    releaseAll?: (...args: any[]) => unknown;
+  },
   apply: (parameters: Record<string, PluginParameterValue>) => void,
 ): InstrumentPluginInstance {
   let disposed = false;
@@ -50,6 +53,9 @@ function createInstrumentInstance(
     node,
     triggerAttackRelease: (note, duration, time, velocity) => {
       if (!disposed) node.triggerAttackRelease(note, duration, time, velocity);
+    },
+    releaseAll: time => {
+      if (!disposed) node.releaseAll?.(time);
     },
     setParameters: parameters => {
       if (!disposed) apply(parameters);
@@ -330,7 +336,7 @@ export const builtInEffectPlugins: readonly EffectPluginDefinition[] = [
     },
   },
   {
-    id: 'duckdaw.effect.parametric-eq', version: '1.0.0', kind: 'effect', name: 'Spectrum Parametric EQ',
+    id: 'duckdaw.effect.parametric-eq', version: '1.0.0', kind: 'effect', name: 'Parametric EQ',
     description: 'Eight-band visual parametric equalizer with realtime FFT analysis.',
     parameters: createEqParameterDefinitions(),
     create: parameters => createParametricEqInstance(parameters),

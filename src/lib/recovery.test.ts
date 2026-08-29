@@ -102,6 +102,23 @@ describe('project recovery snapshots', () => {
     });
   });
 
+  it('serializes clear after an in-flight recovery save', async () => {
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>(resolve => { releaseWrite = resolve; });
+    setMock.mockImplementationOnce(async (key: string, value: unknown) => {
+      await writeGate;
+      memory.set(key, value);
+    });
+
+    const save = saveRecoverySnapshot();
+    await vi.waitFor(() => expect(setMock).toHaveBeenCalled());
+    const clear = clearRecoverySnapshot();
+    releaseWrite();
+    await Promise.all([save, clear]);
+
+    expect(await getRecoverySnapshot()).toBeNull();
+  });
+
   it('clears a recovery snapshot after explicit discard or save', async () => {
     await saveRecoverySnapshot();
     await clearRecoverySnapshot();

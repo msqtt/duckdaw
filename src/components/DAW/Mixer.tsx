@@ -9,6 +9,8 @@ import { movePluginInChain } from '../../lib/pluginUi';
 import { usePluginInspectorStore } from '../../store/pluginInspectorStore';
 import { AutomationCreateButton } from './AutomationCreateButton';
 import { RoutingGraph } from './RoutingGraph';
+import { ResizeHandle } from '../ui/ResizeHandle';
+import { mixerUiStore, useMixerUiStore } from '../../store/mixerUiStore';
 
 const pluginRegistry = getDefaultPluginRegistry();
 const effectDefinitions = pluginRegistry.list('effect');
@@ -115,6 +117,8 @@ function PluginChainEditor({
 
 function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   const updateTrack = useDAWStore(state => state.updateTrack);
+  const width = useMixerUiStore(state => state.trackWidths[track.id] ?? 128);
+  const setTrackWidth = useMixerUiStore(state => state.setTrackWidth);
   const meterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,7 +140,21 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   }, [track.id]);
 
   return (
-    <div data-testid="mixer-channel" data-track-id={track.id} className="w-32 shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full">
+    <div
+      data-testid="mixer-channel"
+      data-track-id={track.id}
+      className="relative shrink-0 bg-neutral-200 dark:bg-neutral-900 border-r border-neutral-300 dark:border-neutral-800 flex flex-col items-center py-2 h-full"
+      style={{ width }}
+    >
+      <ResizeHandle
+        ariaLabel={`Resize mixer channel ${track.name}`}
+        value={width}
+        min={128}
+        max={320}
+        side="right"
+        onChange={next => setTrackWidth(track.id, next)}
+        className="absolute -right-1 top-0 z-20 h-full w-2 cursor-ew-resize"
+      />
       <div className="text-xs font-bold truncate w-full px-2 text-center text-neutral-600 dark:text-neutral-300 pointer-events-none mb-2">
         {track.name}
       </div>
@@ -191,7 +209,7 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
             <AutomationCreateButton className="absolute left-0 top-0 z-10" trackId={track.id} trackName={track.name} binding={{ target: 'volume', label: 'Volume', range: { min: 0, max: 1 }, valueType: 'continuous' }} currentValue={track.volume} />
             {/* Meter */}
             <div className="w-1.5 h-full bg-neutral-300 dark:bg-neutral-800 rounded overflow-hidden mr-6 flex flex-col justify-end">
-               <div ref={meterRef} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
+               <div ref={meterRef} data-testid="track-meter-level" data-track-id={track.id} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} />
             </div>
             {/* Slider */}
             <input 
@@ -316,8 +334,6 @@ function MasterChannel() {
 }
 
 export function Mixer() {
-
-function RoutingControls() { return <RoutingGraph />; }
   const { tracks, buses, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
       buses: state.buses,
@@ -327,6 +343,20 @@ function RoutingControls() { return <RoutingGraph />; }
       setPanelHeight: state.setPanelHeight,
       setPanelFullScreen: state.setPanelFullScreen
   })));
+  const routingOpen = useMixerUiStore(state => state.routingOpen);
+  const routingExpanded = useMixerUiStore(state => state.routingExpanded);
+  const routingZoom = useMixerUiStore(state => state.routingZoom);
+  const toggleRouting = useMixerUiStore(state => state.toggleRouting);
+  const closeRouting = useMixerUiStore(state => state.closeRouting);
+  const setRoutingExpanded = useMixerUiStore(state => state.setRoutingExpanded);
+  const setRoutingZoom = useMixerUiStore(state => state.setRoutingZoom);
+
+  useEffect(() => {
+    const activeIds = new Set(tracks.map(track => track.id));
+    for (const trackId of Object.keys(mixerUiStore.getState().trackWidths)) {
+      if (!activeIds.has(trackId)) mixerUiStore.getState().removeTrackWidth(trackId);
+    }
+  }, [tracks]);
   
   return (
     <div 
@@ -346,15 +376,33 @@ function RoutingControls() { return <RoutingGraph />; }
                   const onUp = () => {
                       window.removeEventListener('pointermove', onMove);
                       window.removeEventListener('pointerup', onUp);
+                      window.removeEventListener('pointercancel', onUp);
                   };
                   window.addEventListener('pointermove', onMove);
                   window.addEventListener('pointerup', onUp);
+                  window.addEventListener('pointercancel', onUp);
               }}
           />
       )}
       <div className="h-8 bg-neutral-200/80 dark:bg-neutral-800/80 border-b border-neutral-300 dark:border-neutral-800 flex items-center px-4 justify-between shrink-0">
         <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300">MIXER</span>
         <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={routingOpen ? 'Hide mixer route' : 'Show mixer route'}
+              aria-expanded={routingOpen}
+              aria-controls="mixer-routing-workspace"
+              onClick={toggleRouting}
+              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${routingOpen ? 'bg-violet-500/20 text-violet-600' : 'text-neutral-500 hover:bg-neutral-300 dark:hover:bg-neutral-700'}`}
+            >ROUTE</button>
+            {routingOpen && (
+              <button
+                type="button"
+                aria-label={routingExpanded ? 'Restore mixer route' : 'Expand mixer route'}
+                onClick={() => setRoutingExpanded(!routingExpanded)}
+                className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+              >{routingExpanded ? '↙' : '↗'}</button>
+            )}
             <button 
               aria-label={panelFullScreen ? 'Exit full screen mixer' : 'Full screen mixer'}
               onClick={() => setPanelFullScreen(!panelFullScreen)}
@@ -364,23 +412,31 @@ function RoutingControls() { return <RoutingGraph />; }
             </button>
             <button 
               aria-label="Close mixer"
-              onClick={() => setBottomPanel(null)}
+              onClick={() => { closeRouting(); setBottomPanel(null); }}
               className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white mb-1 leading-none text-lg font-mono font-bold ml-2"
             >
               &times;
             </button>
         </div>
       </div>
-      <RoutingControls />
-      <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950 pr-4">
-         {tracks.map(track => (
-           <MixerChannel key={track.id} track={track} />
-         ))}
-         {buses.filter(bus => bus.outputBusId != null).map(bus => (
-           <BusMixerChannel key={bus.id} bus={bus} />
-         ))}
-         <MasterChannel />
-      </div>
+      {routingOpen && (
+        <RoutingGraph
+          expanded={routingExpanded}
+          zoom={routingZoom}
+          onZoomChange={setRoutingZoom}
+        />
+      )}
+      {!routingExpanded && (
+        <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950 pr-4">
+           {tracks.map(track => (
+             <MixerChannel key={track.id} track={track} />
+           ))}
+           {buses.filter(bus => bus.outputBusId != null).map(bus => (
+             <BusMixerChannel key={bus.id} bus={bus} />
+           ))}
+           <MasterChannel />
+        </div>
+      )}
     </div>
   );
 }

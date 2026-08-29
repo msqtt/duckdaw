@@ -20,6 +20,7 @@ vi.mock('tone', () => ({
 }));
 
 class FakeMediaRecorder {
+  static stopDelayMs = 0;
   state = 'inactive';
   mimeType = 'audio/webm;codecs=opus';
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
@@ -34,7 +35,8 @@ class FakeMediaRecorder {
   stop() {
     this.ondataavailable?.({ data: new Blob(['audio'], { type: this.mimeType }) });
     this.state = 'inactive';
-    this.onstop?.();
+    if (FakeMediaRecorder.stopDelayMs > 0) setTimeout(() => this.onstop?.(), FakeMediaRecorder.stopDelayMs);
+    else this.onstop?.();
   }
 }
 
@@ -44,6 +46,8 @@ import { MicRecorder } from './recorder';
 
 describe('MicRecorder', () => {
   beforeEach(() => {
+    FakeMediaRecorder.stopDelayMs = 0;
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
     open.mockClear();
     connect.mockClear();
     close.mockClear();
@@ -81,6 +85,37 @@ describe('MicRecorder', () => {
     await expect(recorder.start()).rejects.toThrow('recorder unavailable');
 
     expect(close).toHaveBeenCalledOnce();
+    expect(recorder.mediaRecorder).toBeNull();
+  });
+
+  it('keeps a restarted recorder alive when the previous onstop arrives late', async () => {
+    const recorder = new MicRecorder();
+    await recorder.start();
+    FakeMediaRecorder.stopDelayMs = 50;
+    const oldStop = recorder.stop();
+
+    await recorder.start();
+    const restarted = recorder.mediaRecorder;
+    expect(restarted?.state).toBe('recording');
+    await oldStop;
+    expect(recorder.mediaRecorder).toBe(restarted);
+    expect(recorder.mediaRecorder?.state).toBe('recording');
+
+    FakeMediaRecorder.stopDelayMs = 0;
+    await expect(recorder.stop()).resolves.toMatchObject({ url: 'blob:recording' });
+  });
+
+  it('cancels a pending start before it can claim shared recorder state', async () => {
+    let releaseOpen!: () => void;
+    open.mockImplementationOnce(() => new Promise<void>(resolve => { releaseOpen = resolve; }));
+    const recorder = new MicRecorder();
+
+    const pendingStart = recorder.start();
+    await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+    await expect(recorder.stop()).resolves.toBeNull();
+    releaseOpen();
+
+    await expect(pendingStart).rejects.toMatchObject({ name: 'AbortError' });
     expect(recorder.mediaRecorder).toBeNull();
   });
 

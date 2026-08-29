@@ -1,6 +1,6 @@
 # DuckDAW 浏览器原生 Plugin SDK 规格
 
-> 状态：核心与 PLUG-UI-01 交互重构均已实现并验证（2026-08-24）；格式：`.duckdaw` 2.1.0；目标发布：0.4.0。本文定义 DuckDAW 自有插件系统，不兼容也不依赖 VST/AU。
+> 状态：核心、PLUG-UI-01、PLUG-INST-02、PLUG-UI-02 与 PLUG-EQ-02 已实现并验证（2026-08-24）；格式：`.duckdaw` 2.1.0；目标发布：0.4.0。本文定义 DuckDAW 自有插件系统，不兼容也不依赖 VST/AU。
 
 ## 1. 范围与安全边界
 
@@ -68,6 +68,12 @@ MIDI Track 有且仅有一个 `instrumentPlugin`。UI 可以从 registry 的 ins
 | `duckdaw.instrument.drums` | Membrane Drums | 膜鼓，兼容 legacy drum |
 | `duckdaw.instrument.pluck` | Pluck | 拨弦示例插件 |
 
+### PLUG-INST-02：MIDI 乐器热切换连续性
+
+已有 `Tone.Part`/调度对象的事件回调必须在执行时按 Track ID 解析当前 instrument instance，禁止捕获可在 descriptor 替换、参数重建、Undo/Redo 或图同步时被 dispose 的实例。乐器热切换不得要求 Clip 内容变化，不得重复创建 schedule 或重复 note。
+
+宿主先成功创建、参数化并连接候选实例，再原子替换 runtime map 和释放旧实例；factory 失败继续遵循 PLUG-INST-01 的内置 synth fallback。Track 删除后仍存活的回调必须安全 no-op；卸载、替换和失败路径保持 dispose 幂等。实时/离线仍使用同一 registry factory，descriptor identity 与 `.duckdaw` 2.1.0 不变。
+
 ### PLUG-FX-01：效果器插件链
 
 Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联 enabled 实例；disabled 和未知 effect 必须无声染直通（bypass）且描述符保留。UI 支持按 registry 添加、启停、删除和编辑参数；每次操作是一个 undo 事务。
@@ -81,7 +87,7 @@ Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联
 | `duckdaw.effect.limiter` | Limiter | threshold |
 | `duckdaw.effect.distortion` | Distortion | distortion, wet |
 | `duckdaw.effect.chorus` | Chorus | frequency, delayTime, depth, wet |
-| `duckdaw.effect.parametric-eq` | Spectrum Parametric EQ | 8 × enabled/frequency/gain/Q |
+| `duckdaw.effect.parametric-eq` | Parametric EQ | 8 × enabled/frequency/gain/Q |
 
 ### PLUG-EQ-01：可视化频谱参数均衡器
 
@@ -89,6 +95,12 @@ Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联
 - Factory 必须构造串行 peaking filter，并以旁路 FFT 分析输出而不产生第二条可听信号路径；`EffectPluginInstance.getFrequencyData?()` 是只读宿主能力，返回当前 dB bins 的副本或 `undefined`，不得暴露可变 AudioNode。
 - Inspector 对该内置 ID 使用专用可视化编辑器而非 32 个通用 slider：对数 X 轴 `20..20000 Hz`，Y 轴 `-24..24 dB`；单击增加、拖拽、Q 编辑和删除都更新同一 descriptor。频谱读取只在 Inspector 挂载且页面可见时运行，并在卸载时取消 animation frame。
 - 实时/离线仍调用同一个 definition factory；离线无需消费 FFT 数据，但必须释放 analyser 和全部 filters。Track/Bus 删除、插件 bypass/删除、参数替换、路由图重建均遵守 PLUG-SDK-02 dispose 规则。
+
+### PLUG-EQ-02：紧凑名称与主题自适应
+
+内置定义的用户名称为 `Parametric EQ`。该变化仅限 display metadata；stable ID `duckdaw.effect.parametric-eq`、版本、instance ID、8 个 band slot、32 个参数 ID/范围、legacy/unknown descriptor 往返全部保持不变，不增加 `shortName` schema。
+
+Inspector 图必须从当前 Light/Dark/System 最终主题获取背景、网格、刻度、response、spectrum、selected/focus token。切换主题不得调用 plugin factory、重建滤波器、修改参数、dirty 或 undo。analyser 缺失/失败时仍保留主题正确的静态曲线。
 
 ### PLUG-UI-01：Track 选择、Mixer 链概览与右侧 Inspector
 
@@ -99,6 +111,12 @@ Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联
 - 调序必须原子替换 `effectPlugins[]`，每次有效上移/下移是一个 undo 事务；首项上移和末项下移禁用且不产生事务。Realtime、offline 与持久化继续按该数组顺序工作。
 - 添加 effect 后自动打开其 Inspector；移除当前 inspected effect 或删除 owner 后 Inspector 显示关闭状态，不得引用失效 descriptor。未知插件保留并显示 `Unavailable: <pluginId>`，不渲染未知参数控件。
 现有 Track `reverb/delay` 保留为 legacy 快捷处理和既有 automation target；它们不冒充通用插件槽。新通用 Track effects 位于 Channel 后、legacy Delay/Reverb 前。Bus effects 使用 `effectPlugins`；2.0 `effects` 只作为迁移/降级镜像。
+
+### PLUG-UI-02：Inspector 尺寸与工作区最大化
+
+Inspector 默认宽 320px，可通过左侧可访问 separator 调整到 `280..min(720, viewportWidth-320)`，并保证主工作区至少 320px。Pointer capture 的 up/cancel、Escape、卸载都必须清理临时拖拽；键盘支持 Arrow 16px、Shift+Arrow 64px、Home/End，并暴露 orientation/value/min/max。
+
+Maximize 仅覆盖应用工作区，不调用浏览器 Fullscreen API；Restore/Escape 恢复原宽与触发焦点。关闭后 maximized 复位，session 内重开保留正常宽度。target、width、maximized 均不进入 descriptor、package、recovery、dirty 或 undo，尺寸变化不得重建/释放插件实例。
 
 ### PLUG-FMT-01：2.1.0 持久化与迁移
 
@@ -165,6 +183,13 @@ Registry 注册发生在音频图创建前。注册失败必须抛出可诊断�
 | PLUG-EQ-T01 | 8 个 band 参数默认/钳位；factory 建立 peaking filters，setParameters 更新且 dispose 幂等释放 filter/FFT |
 | PLUG-EQ-T02 | Inspector 频谱 fallback、加点/拖点/Q/删除、8 点上限与每手势单 undo；Track/Bus descriptor 往返 |
 | PLUG-EQ-T03 | realtime 与 offline 使用同一 EQ factory；关闭 Inspector、删除插件和 Bus 图重建不残留 RAF/analyser |
+| PLUG-T13 | 同一 MIDI Part callback 在 instrument A→B 热切换后只触发当前 B，A dispose 一次且 schedule 不重复 |
+| PLUG-T14 | 参数重建、播放中切换与 Undo/Redo 后既有 callback 始终命中当前实例，音符不漏发/重复 |
+| PLUG-T15 | instrument factory fallback、Track 删除后的 callback no-op 与其他轨隔离，失败/删除资源幂等释放 |
+| PLUG-UI-T02-01 | Inspector pointer/keyboard resize、viewport clamp、pointercancel/unmount cleanup，零 dirty/undo/package 副作用 |
+| PLUG-UI-T02-02 | Maximize/Restore/Escape、触发焦点恢复、关闭重开保留宽度且不重建插件 |
+| PLUG-EQ-T04 | `Parametric EQ` display metadata 改变但 plugin/instance/parameter IDs、版本和 package round-trip 不变 |
+| PLUG-EQ-T05 | Light/Dark/System computed visual token 改变，切换前后参数、descriptor、factory/engine active 状态不变 |
 
 
 ### 5.1 交付证据（2026-08-20）

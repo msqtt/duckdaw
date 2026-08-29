@@ -45,6 +45,14 @@
 - PAT 仅存 `sessionStorage`，UI 明示风险并提供清除按钮，不进入工程、日志或 URL。OAuth 属后续部署增强，不是当前本地应用前置条件。
 - 证据：`complianceContracts.test.ts` 锁定会话存储、风险文案、清除和 409 分支。
 
+### FR-PROJ-09 统一 Project 工作流 — 已实现（2026-08-24）
+- **Project 是唯一顶层工作概念**。顶栏 Project 入口集中提供 New Project、Recent Projects、Open Local Project、Save/Save As 与 GitHub Sync；Settings 不再重复承载工程导入导出或远端同步。`Recent Projects` 仅表示最多 10 个最近 File System Access 句柄，不冒充版本历史。
+- Arrangement 保留为 Project 内部的独立时间线及 `.duckdaw` 2.1.0 兼容字段，不得改名、扁平化或迁移；界面不得把 Arrangement 呈现为与 Project 并列的打开/保存对象。
+- 所有替换当前 Project 的入口必须执行同一事务：dirty 决策 → 临时读取/解包/校验/迁移 → 停止 transport/录音 → 原子 `replaceProject` → 切换来源绑定 → 清 undo、选择、Inspector 与过期 recovery。取消、权限拒绝、解析失败、网络失败或 GitHub 冲突取消时，当前 Project、文件句柄、baseline、dirty、undo 与 recovery 均保持不变。
+- 从 Local、GitHub、SMF 或 Template 成功打开后不得保留不属于新 Project 的旧主文件句柄；仅 New/Template 生成新 `projectId`，Open/Save/Save As/Download/GitHub Sync 保持工程身份。PAT 仍仅存 `sessionStorage`。
+- Project Center 的展开状态、当前来源提示和导航焦点是 session UI state，不进入 package、recovery、dirty 或 undo；本需求不升级 `.duckdaw` 2.1.0。
+- 验收：`PROJ-T09-01~07` 覆盖 dirty cancel、旧句柄隔离、失败零提交、身份、来源 checkpoint、PAT/baseline 和迁移；`PROJ-E2E-09` 覆盖 New→Local→Recent（平台支持时）→GitHub mock 及 unsupported FSA。
+
 ## 2. 传输、时间轴与导航
 
 ### FR-TRN-01 播放、暂停、停止 — 已实现
@@ -75,6 +83,14 @@
 - 双击标尺新增，单击跳转，双击标记重命名；右键菜单支持重命名、改色和删除。
 - 位置非负并完整保存加载。
 - 证据：`projectStorage.test.ts` 往返标记；`complianceContracts.test.ts` 锁定菜单操作。
+
+### FR-TRN-07 真实播放状态与幂等停止 — 已实现（2026-08-24）
+- Transport runtime 必须区分 `stopped | playing | paused`。Play 从 stopped 启动、从 paused 续播；Pause 保留当前位置；playing/paused 下 Stop 只执行一次停止并回到起点。
+- stopped、起点、无 MIDI/Mic recording 且无 Count-in 时点击或按键 Stop 是严格音频 no-op：不得初始化/恢复 AudioContext、不得调用 Tone Transport stop/seek、不得触发任何新 note 或可听瞬态。重复 Stop 同样无副作用。
+- playing 时顶栏必须显示真实 Pause glyph 且可访问名称为 `Pause`；paused/stopped 时显示 Play glyph 且名称为 `Play`。按钮、Space、Enter、Project 切换必须复用同一命令语义，Store 与 Tone Transport 不得分叉。
+- 全局 Stop 仍取消 MIDI/Mic recording 与 Count-in、阻止延迟采集并释放输入/分析器/recorder；实际停止必须清除后续调度和活动 voice，不留下延迟 onset。
+- runtime 状态不进入 package、recovery、dirty 或 undo。本需求不改变时间模型和 `.duckdaw` 版本。
+- 验收：`TRN-T07-01~04` 覆盖 idle no-op、play/pause/stop 状态机、voice/调度释放及录音/Project 切换；`TRN-E2E-07` 三浏览器断言 idle Stop 无 meter 瞬态并核对 glyph/accessible name。
 
 ## 3. 编排、轨道与片段
 
@@ -166,6 +182,35 @@
 - 提供内置 `duckdaw.effect.parametric-eq`，可挂载到 Track 或 Bus 的任意效果槽；实时和离线使用同一 factory 与最多 8 个 peaking bands，点参数为 enabled/frequency/gain/Q。
 - Inspector 显示实时 FFT 频谱和对数频率 EQ 曲线。单击空白处增加点，指针拖拽修改频率/增益，选中点可调 Q 或删除；频率限制 `20..20000 Hz`、增益 `-24..24 dB`、Q `0.1..18`，超过 8 点时拒绝新增。每次添加、删除或一次拖拽手势只形成一个可撤销事务。
 - 频谱不可用、页面后台或离线渲染时 EQ 音频处理仍正常，UI 显示静态曲线而不报错；Inspector 关闭、插件删除、图重建和导出完成必须停止 animation frame 并 dispose FFT/Filter 节点。参数使用现有 v2.1 descriptor number 值持久化，未知/旧工程无需迁移。
+
+### PLUG-INST-02 MIDI 乐器热切换连续性 — 已实现（2026-08-24）
+- MIDI Clip 的既有调度回调在乐器选择、参数替换、Undo/Redo 或播放中切换后，必须在事件执行时解析该 Track 当前有效 instrument instance，不得继续调用已 dispose 的旧实例、漏发后续音符或重复调度。
+- 新 instrument 必须先成功创建并接入候选信号链，再释放旧实例；factory 失败遵循现有 synth fallback，删除 Track 后旧回调安全 no-op，其他 Track 不受影响。
+- 该修复不改变 Clip 调度签名、descriptor identity、unknown plugin 往返、实时/离线 factory 或 `.duckdaw` 2.1.0。
+- 验收：`PLUG-T13~15` 覆盖同一 Part callback 热切换、参数/Undo/播放中切换、fallback/删除/释放；`PLUG-E2E-02` 三浏览器证明循环 MIDI 在切换前后持续产生真实 meter 输出。
+
+### PLUG-UI-02 可调整与最大化 Plugin Inspector — 已实现（2026-08-24）
+- Inspector 默认宽 320px，用户可从左边缘用 pointer 或键盘调整到 `280..min(720, viewportWidth-320)`；主工作区至少保留 320px。宽度在当前 session 内关闭/重开后保留，不写工程、不 dirty、不 undo。
+- Maximize 覆盖应用工作区但不调用浏览器 Fullscreen API；Restore 恢复原宽，Escape 先退出最大化并把焦点还给触发按钮。关闭时最大化状态复位，pointer capture、全局监听和临时拖拽必须释放。
+- resize separator 必须提供 orientation、value/min/max 与 Arrow（16px）、Shift+Arrow（64px）、Home/End 键盘语义；窄 viewport 仍可关闭和恢复。
+- 验收：`PLUG-UI-T02-01/02` 覆盖 clamp、pointercancel/unmount、键盘、焦点、零持久副作用；`PLUG-E2E-03` 覆盖三浏览器与 axe。
+
+### MIX-ROUTE-04 可折叠与放大的 Route 工作区 — 已实现（2026-08-24）
+- Mixer Route 默认关闭；Mixer header 提供带 `aria-expanded/aria-controls` 的 Route 开关。关闭只撤销未完成的端口连接候选，不修改、释放或重建既有 Bus/Send graph。
+- Route 打开后可在 Mixer 内 Expand/Restore；Expand 只扩大 Route 工作区，不冒充浏览器/应用全屏。既有画布 zoom `70%..150%` 与工作区放大是独立语义，关闭/重开保留 graph 与 session zoom。
+- toggle、expand 和 zoom 均为 session UI state，不 dirty、不 undo、不 package；每个有效路由编辑仍保持 MIX-ROUTE-03 的 DAG、零提交和单 undo 合同。
+- 验收：`MIX-ROUTE-T04-01/02` 覆盖默认关闭、pending cancel、graph/zoom/dirty 保持和放大布局；`MIX-E2E-04` 覆盖 pointer、键盘与三浏览器。
+
+### MIX-UI-01 可调整 Track channel strip — 已实现（2026-08-24）
+- 每个 Track strip 默认/最小 128px、最大 320px，可从右边缘用 pointer 或与 Inspector 相同的键盘 separator 语义独立调宽；Bus 与 sticky Master 保持既有宽度和行为。
+- Track 宽度按 ID 保存于 session UI state，删除 Track 时清理；拖宽不得触发 Track reorder、slider、dirty、undo、recovery 或 package 变化，横向滚动与 sticky Master 不得失效。
+- 验收：`MIX-UI-T01-01/02` 覆盖独立宽度、clamp、删除清理、pointercancel、键盘和零工程副作用；`MIX-E2E-05` 覆盖插件长名称可见性、滚动和三浏览器。
+
+### PLUG-EQ-02 紧凑命名与主题自适应 — 已实现（2026-08-24）
+- 内置 `duckdaw.effect.parametric-eq` 的用户名称统一为 `Parametric EQ`；stable plugin ID、instance ID、8×4 参数 ID、范围、版本与 descriptor 往返均不变。
+- EQ 图的背景、网格、刻度、静态曲线、动态频谱、选中点和 focus 状态必须跟随 Light/Dark/System 的最终主题，保持可读对比；主题切换只改变视觉，不重建/bypass 音频、不修改参数或撤销历史。
+- 频谱 API 缺失、页面后台和 analyser 读取失败继续只隐藏动态频谱，保留主题正确的静态响应。
+- 验收：`PLUG-EQ-T04/05` 覆盖 display-only 兼容、computed theme 与参数/engine 不变；`PLUG-EQ-E2E-02` 覆盖两主题、键盘编辑和 axe。
 
 ## 7. 导出
 

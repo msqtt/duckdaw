@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { X, SlidersHorizontal } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { X, SlidersHorizontal, Maximize2, Minimize2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDAWStore } from '../../store/dawStore';
 import { usePluginInspectorStore } from '../../store/pluginInspectorStore';
@@ -8,6 +8,7 @@ import type { PluginInstanceDescriptor, PluginParameterDefinition } from '../../
 import type { AutomationTarget } from '../../lib/automation';
 import { AutomationCreateButton } from './AutomationCreateButton';
 import { ParametricEqEditor } from './ParametricEqEditor';
+import { ResizeHandle } from '../ui/ResizeHandle';
 
 const pluginRegistry = getDefaultPluginRegistry();
 
@@ -96,6 +97,11 @@ function ParameterEditor({
 export function PluginInspector() {
   const target = usePluginInspectorStore(state => state.target);
   const close = usePluginInspectorStore(state => state.close);
+  const width = usePluginInspectorStore(state => state.width);
+  const maximized = usePluginInspectorStore(state => state.maximized);
+  const setWidth = usePluginInspectorStore(state => state.setWidth);
+  const setMaximized = usePluginInspectorStore(state => state.setMaximized);
+  const maximizeButtonRef = useRef<HTMLButtonElement>(null);
   const { tracks, buses, updateTrack, updateBus } = useDAWStore(useShallow(state => ({
     tracks: state.tracks,
     buses: state.buses,
@@ -120,6 +126,22 @@ export function PluginInspector() {
   useEffect(() => {
     if (target != null && (owner == null || plugin == null)) close();
   }, [close, owner, plugin, target]);
+
+  useEffect(() => {
+    const handleViewportResize = () => setWidth(width, window.innerWidth);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !maximized) return;
+      event.preventDefault();
+      setMaximized(false);
+      requestAnimationFrame(() => maximizeButtonRef.current?.focus());
+    };
+    window.addEventListener('resize', handleViewportResize);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('resize', handleViewportResize);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [maximized, setMaximized, setWidth, width]);
 
   if (target == null || owner == null || plugin == null) return null;
   const definition = pluginRegistry.get(plugin.pluginId);
@@ -152,14 +174,34 @@ export function PluginInspector() {
     <aside
       role="complementary"
       aria-label="Plugin Inspector"
-      className="w-80 shrink-0 border-l border-neutral-300 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 flex flex-col overflow-hidden"
+      data-maximized={maximized ? 'true' : 'false'}
+      className={`${maximized ? 'absolute inset-0 z-40 border-l-0' : 'relative shrink-0 border-l'} border-neutral-300 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 flex flex-col overflow-hidden`}
+      style={maximized ? undefined : { width }}
     >
+      {!maximized && (
+        <ResizeHandle
+          ariaLabel="Resize plugin inspector"
+          value={width}
+          min={280}
+          max={Math.min(720, Math.max(280, (typeof window === 'undefined' ? 1_280 : window.innerWidth) - 320))}
+          side="left"
+          onChange={next => setWidth(next)}
+          className="absolute -left-1 top-0 z-20 h-full w-2 cursor-ew-resize"
+        />
+      )}
       <header className="h-12 shrink-0 border-b border-neutral-300 px-3 dark:border-neutral-800 flex items-center gap-2">
         <SlidersHorizontal size={16} className="text-emerald-500" />
         <div className="min-w-0 flex-1">
           <div className="text-[10px] uppercase tracking-wider text-neutral-500">{owner.name} · {target.kind}</div>
           <h2 className="truncate text-sm font-semibold">{available ? definition.name : `Unavailable: ${plugin.pluginId}`}</h2>
         </div>
+        <button
+          ref={maximizeButtonRef}
+          type="button"
+          aria-label={maximized ? 'Restore plugin inspector' : 'Maximize plugin inspector'}
+          onClick={() => setMaximized(!maximized)}
+          className="rounded p-1 text-neutral-500 hover:bg-neutral-200 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-white"
+        >{maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
         <button
           type="button"
           aria-label="Close plugin inspector"
