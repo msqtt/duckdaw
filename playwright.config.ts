@@ -25,7 +25,18 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    {
+      name: 'firefox',
+      use: {
+        ...devices['Desktop Firefox'],
+        launchOptions: {
+          firefoxUserPrefs: {
+            'media.autoplay.default': 0,
+            'media.autoplay.blocking_policy': 0,
+          },
+        },
+      },
+    },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
 });

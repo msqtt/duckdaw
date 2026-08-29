@@ -44,6 +44,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Start virtual audio sink for Firefox
+        if: matrix.browser == 'firefox'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=duckdaw rate=48000
+          pactl set-default-sink duckdaw
+          pactl info
       - run: npm run test:e2e -- --project=${{ matrix.browser }}
       - if: failure()
         uses: actions/upload-artifact@v4
