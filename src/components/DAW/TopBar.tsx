@@ -91,7 +91,9 @@ export function TopBar() {
         if (typeof time === 'string') {
           const parts = time.split(':');
           if (parts.length >= 3) {
-             setCurrentTime(`${parts[0]}:${parts[1]}:${Math.floor(parseFloat(parts[2])).toString().padStart(3, '0')}`);
+             const seconds = Math.floor(parseFloat(parts[1]));
+             const milliseconds = Math.floor(parseFloat(parts[2]));
+             setCurrentTime(`${parts[0]}:${seconds.toString().padStart(2, '0')}:${milliseconds.toString().padStart(3, '0')}`);
           }
         } else if (typeof time === 'number') {
            const mins = Math.floor(time / 60);
