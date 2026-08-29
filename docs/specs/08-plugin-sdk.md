@@ -81,7 +81,14 @@ Track 与 Bus 均可持有有序 `effectPlugins[]`。宿主按数组顺序串联
 | `duckdaw.effect.limiter` | Limiter | threshold |
 | `duckdaw.effect.distortion` | Distortion | distortion, wet |
 | `duckdaw.effect.chorus` | Chorus | frequency, delayTime, depth, wet |
+| `duckdaw.effect.parametric-eq` | Spectrum Parametric EQ | 8 × enabled/frequency/gain/Q |
 
+### PLUG-EQ-01：可视化频谱参数均衡器
+
+- EQ descriptor 固定包含 8 个 band slot；每个 slot 使用有限 number 参数 `bandNEnabled` (`0|1`)、`bandNFrequency` (`20..20000 Hz`)、`bandNGain` (`-24..24 dB`) 和 `bandNQ` (`0.1..18`)。未启用 slot 的 gain 视为 `0 dB`，因此新增/删除点无需 schema 或格式变更。
+- Factory 必须构造串行 peaking filter，并以旁路 FFT 分析输出而不产生第二条可听信号路径；`EffectPluginInstance.getFrequencyData?()` 是只读宿主能力，返回当前 dB bins 的副本或 `undefined`，不得暴露可变 AudioNode。
+- Inspector 对该内置 ID 使用专用可视化编辑器而非 32 个通用 slider：对数 X 轴 `20..20000 Hz`，Y 轴 `-24..24 dB`；单击增加、拖拽、Q 编辑和删除都更新同一 descriptor。频谱读取只在 Inspector 挂载且页面可见时运行，并在卸载时取消 animation frame。
+- 实时/离线仍调用同一个 definition factory；离线无需消费 FFT 数据，但必须释放 analyser 和全部 filters。Track/Bus 删除、插件 bypass/删除、参数替换、路由图重建均遵守 PLUG-SDK-02 dispose 规则。
 
 ### PLUG-UI-01：Track 选择、Mixer 链概览与右侧 Inspector
 
@@ -151,21 +158,25 @@ Registry 注册发生在音频图创建前。注册失败必须抛出可诊断�
 | PLUG-T06 | 插件替换、轨道删除、Bus 图重建会 dispose；失败创建释放前序实例 |
 | PLUG-T07 | TrackHeader 选择 instrument；右侧 Inspector 修改 instrument/effect 参数；Mixer 添加/打开/启停/删除 effect，写入 Store 并可 undo；Mixer 不内联完整参数 |
 | PLUG-T08 | 2.1 package round-trip 保留已知和未知 descriptors；无效 descriptor 原子拒绝 |
-| PLUG-T09 | 五种 instrument、五种 effect 均已注册并能创建/释放实例 |
+| PLUG-T09 | 五种 instrument、六种 effect 均已注册并能创建/释放实例 |
 | PLUG-T10 | Chromium/Firefox/WebKit 用户路径和 serious/critical axe 通过 |
 | PLUG-T11 | unit、typecheck、build、bundle budgets、diff gates 全通过 |
 | PLUG-T12 | 同一 Track/Bus 添加多个 effect instances；上/下移动保持 descriptor 顺序并以一次 undo/redo 恢复；realtime/offline/package 顺序一致 |
+| PLUG-EQ-T01 | 8 个 band 参数默认/钳位；factory 建立 peaking filters，setParameters 更新且 dispose 幂等释放 filter/FFT |
+| PLUG-EQ-T02 | Inspector 频谱 fallback、加点/拖点/Q/删除、8 点上限与每手势单 undo；Track/Bus descriptor 往返 |
+| PLUG-EQ-T03 | realtime 与 offline 使用同一 EQ factory；关闭 Inspector、删除插件和 Bus 图重建不残留 RAF/analyser |
 
 
 ### 5.1 交付证据（2026-08-20）
 
-- `pluginSdk.test.ts`：registry、definition/descriptor/schema、参数规范化、legacy mapping 与 5+5 catalog。
+- `pluginSdk.test.ts`：registry、definition/descriptor/schema、参数规范化、legacy mapping 与 5 instruments + 6 effects catalog。
 - `pluginRuntime.test.ts`：共享 factory、unknown/kind mismatch、Instrument factory 抛错回退 synth、fallback 失败静音、Effect factory 抛错 bypass 且后续链继续。
-- `audioEnginePlugin.test.ts`：可注入 registry 的真实 `syncTracks`/`syncRouting`、替换/删除/Bus rebuild dispose、MIDI `Tone.Part` 调度到 plugin `triggerAttackRelease`、5+5 factory 创建/触发/幂等释放。
+- `audioEnginePlugin.test.ts`：可注入 registry 的真实 `syncTracks`/`syncRouting`、替换/删除/Bus rebuild dispose、MIDI `Tone.Part` 调度到 plugin `triggerAttackRelease`、5 instruments + 6 effects factory 创建/触发/幂等释放。
 - `pluginPersistence.test.ts` 与 `projectStorage.test.ts`：2.1 migration/round-trip、unknown descriptor 保留、无效嵌套参数与 Audio Track instrument 原子拒绝。
 - `PLUG-E2E-01`：TrackHeader 选择乐器、右侧 Inspector 参数、Mixer Track 多 Effect 添加/打开/调序及 undo/redo；Chromium/Firefox/WebKit 均通过。
-- 质量门禁：完整 unit、TypeScript no-emit、production build、bundle size、三浏览器 E2E 与 `git diff --check` 均通过；DAWApp 393.26/400 KiB，`duckdaw-plugins` 9.85/40 KiB；全矩阵与 AUTO-02 合计 Vitest 316/316、Playwright 24/24。
-- 独立审查：核心 SDK 首次复审发现第三方 factory 抛错降级缺口并修复；本轮再次逐项核查 TrackHeader→Inspector、Mixer ordered chain、Automation UI→Store→AudioEngine/Export 与 dispose 调用链，结论为 **PASS，无 P0/P1**。
+- `PLUG-EQ-01` 最终证据：`parametricEq.test.ts` 覆盖 8 band/32 number 参数和边界；`audioEnginePlugin.test.ts` 覆盖 filter factory、FFT 构造/连接/读取 fallback 与 dispose；`pluginPersistence.test.ts` 覆盖 Track/Bus 2.1 往返；`MIX-E2E-03` 三浏览器验证 Bus 挂载、键盘/指针点编辑、Solo→Bus meter 和 unsupported analyser fallback。
+- 质量门禁：完整 unit、TypeScript no-emit、production build、bundle size、三浏览器 E2E、audit 与 `git diff --check` 均通过；Vitest 53 files/336 tests，Playwright 36/36；DAWApp 399.30/400 KiB，`duckdaw-plugins` 12.39/40 KiB。
+- 独立审查：核心 SDK 首次复审发现第三方 factory 抛错降级缺口并修复；参数 EQ/路由/Solo 三轮调用链复审继续关闭 PRE gate、FFT fallback、Automation override 生命周期和持久化重复 Send；最终结论 **PASS，无 P0/P1**。
 ## 6. 非目标与后续扩展
 
 本批不承诺运行时安装市场、签名包、AudioWorklet 沙箱、任意采样器资源包或跨进程崩溃隔离。插件参数 Automation 已转由 [`09-automation.md`](./09-automation.md) 的 AUTO-02 冻结；其完成状态不得仅由 Plugin SDK 类型存在推断。

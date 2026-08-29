@@ -6,7 +6,7 @@ import { Dropdown } from '../ui/Dropdown';
 import toast from 'react-hot-toast';
 import { createExportPlan } from '../../lib/exportPlan';
 import { useShallow } from 'zustand/react/shallow';
-import { createTrackMixSettings } from '../../lib/mixSettings';
+import { createTrackMixSettings, resolveTrackAudibility } from '../../lib/mixSettings';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import ffmpegCoreURL from '@ffmpeg/core?url';
@@ -116,8 +116,21 @@ export function ExportModal() {
              const pluginInstances = new Map<string, InstrumentPluginInstance | EffectPluginInstance>();
              const pluginParameters = new Map<string, Record<string, PluginParameterValue>>();
              const trackInputs = new Map<string, Tone.Gain>();
+             const trackAudibilityGains = new Map<string, Tone.Gain>();
              const trackOutputs = new Map<string, Tone.Gain>();
              const trackChannels = new Map<string, Tone.Channel>();
+             const trackMuteStates = new Map(tracks.map(track => [track.id, track.isMuted]));
+             const trackSoloStates = new Map(tracks.map(track => [track.id, track.isSolo]));
+             const applyTrackAudibility = () => {
+               const audibility = resolveTrackAudibility(tracks.map(track => ({
+                 id: track.id,
+                 isMuted: trackMuteStates.get(track.id) ?? false,
+                 isSolo: trackSoloStates.get(track.id) ?? false,
+               })));
+               for (const [trackId, gate] of trackAudibilityGains) {
+                 gate.gain.value = audibility.get(trackId) ? 1 : 0;
+               }
+             };
              const trackReverbs = new Map<string, Tone.Reverb>();
              const trackDelays = new Map<string, Tone.FeedbackDelay>();
              const busInputs = new Map<string, Tone.Gain>();
@@ -127,20 +140,20 @@ export function ExportModal() {
              const fadeGains = new Map<string, Tone.Gain>();
              
              for (const track of tracks) {
-                 const mix = createTrackMixSettings(track);
+                 const mix = createTrackMixSettings(track, tracks.some(candidate => candidate.isSolo));
                  const input = new Tone.Gain(1);
+                 const audibility = new Tone.Gain(1);
                  const channel = new Tone.Channel();
                  const output = new Tone.Gain(1);
                  channel.volume.value = mix.volumeDb;
                  channel.pan.value = mix.pan;
-                 channel.mute = mix.muted;
-                 channel.solo = mix.solo;
                  
                  const reverb = new Tone.Reverb(2);
                  const delay = new Tone.FeedbackDelay("8n", 0.3);
                  reverb.wet.value = mix.reverbWet;
                  delay.wet.value = mix.delayWet;
-                 input.connect(channel);
+                 input.connect(audibility);
+                 audibility.connect(channel);
                  let trackTail: Tone.ToneAudioNode = channel;
                  const instantiatedTrackEffects = instantiateEffectChain(track.effectPlugins ?? []);
                  const trackEffects = instantiatedTrackEffects.map(plugin => plugin.instance);
@@ -150,14 +163,15 @@ export function ExportModal() {
                    pluginParameters.set(`${track.id}:${plugin.descriptor.id}`, { ...plugin.descriptor.parameters });
                  }
                  for (const effect of trackEffects) {
-                   trackTail.connect(effect.node);
-                   trackTail = effect.node;
+                   trackTail.connect(effect.inputNode ?? effect.node);
+                   trackTail = effect.outputNode ?? effect.node;
                  }
                  trackTail.connect(delay);
                  delay.connect(reverb);
                  reverb.connect(output);
 
                  trackInputs.set(track.id, input);
+                 trackAudibilityGains.set(track.id, audibility);
                  trackOutputs.set(track.id, output);
                  trackChannels.set(track.id, channel);
                  trackReverbs.set(track.id, reverb);
@@ -176,6 +190,7 @@ export function ExportModal() {
                      }
                  }
              }
+             applyTrackAudibility();
 
              for (const bus of buses) {
                  const input = new Tone.Gain(1);
@@ -190,8 +205,8 @@ export function ExportModal() {
                  const busEffects = instantiateEffectChain(descriptors).map(plugin => plugin.instance);
                  ownedPluginInstances.push(...busEffects);
                  for (const effect of busEffects) {
-                     tail.connect(effect.node);
-                     tail = effect.node;
+                     tail.connect(effect.inputNode ?? effect.node);
+                     tail = effect.outputNode ?? effect.node;
                  }
                  tail.connect(output);
                  busInputs.set(bus.id, input);
@@ -201,7 +216,7 @@ export function ExportModal() {
              const endpoint = (id: string): Tone.ToneAudioNode | ReturnType<typeof Tone.getDestination> | undefined => {
                  if (id === 'destination') return Tone.getDestination();
                  const trackMatch = /^track:(.+):(pre|post)$/.exec(id);
-                 if (trackMatch) return trackMatch[2] === 'pre' ? trackInputs.get(trackMatch[1]) : trackOutputs.get(trackMatch[1]);
+                 if (trackMatch) return trackMatch[2] === 'pre' ? trackAudibilityGains.get(trackMatch[1]) : trackOutputs.get(trackMatch[1]);
                  const busMatch = /^bus:(.+):(input|pre|post)$/.exec(id);
                  if (busMatch) return busMatch[2] === 'post' ? busOutputs.get(busMatch[1]) : busInputs.get(busMatch[1]);
                  return undefined;
@@ -243,11 +258,10 @@ export function ExportModal() {
                    );
                    for (const event of events) {
                      if (parsedTarget.kind === 'track') {
-                       const channel = trackChannels.get(track.id);
-                       if (!channel) continue;
                        scheduleOfflineControl(() => {
-                         if (parsedTarget.parameter === 'mute') channel.mute = event.value >= 0.5;
-                         else channel.solo = event.value >= 0.5;
+                         if (parsedTarget.parameter === 'mute') trackMuteStates.set(track.id, event.value >= 0.5);
+                         else trackSoloStates.set(track.id, event.value >= 0.5);
+                         applyTrackAudibility();
                        }, event.time);
                        continue;
                      }

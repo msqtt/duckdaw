@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { dawStore } from '../store/dawStore';
 import { DUCKDAW_FORMAT_VERSION, validatePersistedProjectState } from './projectStorage';
+import { createDefaultEqParameters } from './parametricEq';
 
 const legacyProject = {
   projectId: 'plugin-migration',
@@ -115,5 +116,24 @@ describe('Plugin SDK project persistence', () => {
         },
       }],
     } as any)).toThrow(/audio track.*instrument plugin/i);
+  });
+
+  it('round-trips Spectrum Parametric EQ descriptors without a format migration', () => {
+    const eq = {
+      id: 'eq-1',
+      pluginId: 'duckdaw.effect.parametric-eq',
+      pluginVersion: '1.0.0',
+      enabled: true,
+      parameters: { ...createDefaultEqParameters(), band4Enabled: 1, band4Frequency: 4321, band4Gain: -3.5, band4Q: 2.4 },
+    };
+    dawStore.getState().loadProject({
+      ...legacyProject,
+      tracks: [{ ...legacyProject.tracks[0], effectPlugins: [eq] }],
+      buses: [{ ...legacyProject.buses[0], effectPlugins: [eq] }],
+    });
+
+    const project = dawStore.getState().getProjectData();
+    expect(project.tracks[0].effectPlugins).toEqual([eq]);
+    expect(project.buses[0].effectPlugins).toEqual([eq]);
   });
 });

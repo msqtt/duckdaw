@@ -1,10 +1,19 @@
+const fftState = vi.hoisted(() => ({
+  unavailable: false,
+  connectFailure: false,
+  instances: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>,
+}));
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('tone', () => {
   class Param { value = 0; cancelScheduledValues() {}; setValueAtTime() {}; linearRampToValueAtTime() {}; exponentialRampToValueAtTime() {}; setValueCurveAtTime() {} }
   class BaseNode {
     connections: unknown[] = [];
-    connect(node: unknown) { this.connections.push(node); return this; }
+    connect(node: unknown) {
+      if (fftState.connectFailure && (node as { isMockFft?: boolean }).isMockFft) throw new Error('FFT connect failed');
+      this.connections.push(node);
+      return this;
+    }
     disconnect() { this.connections = []; return this; }
     chain(...nodes: unknown[]) { this.connections.push(...nodes); return this; }
     toDestination() { return this; }
@@ -21,6 +30,16 @@ vi.mock('tone', () => {
     Limiter: class extends BaseNode { threshold = new Param(); },
     Distortion: class extends Wet { distortion = 0; },
     Chorus: class extends Wet { frequency = new Param(); delayTime = 0; depth = 0; start() { return this; } },
+    Filter: class extends BaseNode { frequency = new Param(); gain = new Param(); Q = new Param(); },
+    FFT: class extends BaseNode {
+      isMockFft = true;
+      constructor() {
+        super();
+        if (fftState.unavailable) throw new Error('FFT unavailable');
+        fftState.instances.push(this);
+      }
+      getValue() { return new Float32Array(256).fill(-100); }
+    },
     PolySynth: class extends BaseNode { set() {}; triggerAttackRelease() {} },
     Player: class extends BaseNode {},
     Synth: class extends BaseNode { set() {}; triggerAttackRelease() {} },
@@ -146,10 +165,28 @@ describe('AudioEngine plugin call chain', () => {
     expect(created[0].dispose).toHaveBeenCalledOnce();
   });
 
-  it('creates, triggers when applicable, and idempotently disposes all five instruments and effects', () => {
+  it('keeps the parametric EQ processing chain active when FFT analysis is unavailable', () => {
+    const registry = createBuiltInPluginRegistry();
+    const definition = registry.get('duckdaw.effect.parametric-eq');
+    expect(definition?.kind).toBe('effect');
+    const parameters = Object.fromEntries(definition!.parameters.map(parameter => [parameter.id, parameter.defaultValue]));
+    fftState.unavailable = true;
+    try {
+      const instance = (definition as any).create(parameters) as EffectPluginInstance;
+      expect(instance.node).toBeDefined();
+      expect(instance.outputNode).toBeDefined();
+      expect(instance.getFrequencyData?.()).toBeUndefined();
+      expect(() => instance.setParameters({ ...parameters, band1Gain: 6 })).not.toThrow();
+      instance.dispose();
+    } finally {
+      fftState.unavailable = false;
+    }
+  });
+
+  it('creates, triggers when applicable, and idempotently disposes all built-in instruments and effects', () => {
     const registry = createBuiltInPluginRegistry();
     expect(registry.list('instrument')).toHaveLength(5);
-    expect(registry.list('effect')).toHaveLength(5);
+    expect(registry.list('effect')).toHaveLength(6);
 
     for (const definition of registry.list()) {
       const parameters = Object.fromEntries(definition.parameters.map(parameter => [parameter.id, parameter.defaultValue]));
@@ -162,6 +199,27 @@ describe('AudioEngine plugin call chain', () => {
         instance.dispose();
         instance.dispose();
       }).not.toThrow();
+    }
+  });
+
+  it('disposes a constructed FFT when the analysis branch cannot connect', () => {
+    const registry = createBuiltInPluginRegistry();
+    const definition = registry.get('duckdaw.effect.parametric-eq');
+    const parameters = Object.fromEntries(definition!.parameters.map(parameter => [parameter.id, parameter.defaultValue]));
+    const start = fftState.instances.length;
+    fftState.connectFailure = true;
+    try {
+      const instance = (definition as any).create(parameters) as EffectPluginInstance;
+      const analyser = fftState.instances[start];
+      expect(instance.node).toBeDefined();
+      expect(instance.outputNode).toBeDefined();
+      expect(instance.getFrequencyData?.()).toBeUndefined();
+      expect(analyser.dispose).toHaveBeenCalledOnce();
+      expect(() => instance.setParameters({ ...parameters, band1Gain: 6 })).not.toThrow();
+      instance.dispose();
+      expect(analyser.dispose).toHaveBeenCalledOnce();
+    } finally {
+      fftState.connectFailure = false;
     }
   });
 });

@@ -85,3 +85,43 @@ describe('Bus/Send Store routing transactions', () => {
     expect(dawStore.getState().buses.some(bus => bus.id === group.id)).toBe(false);
   });
 });
+
+
+describe('MIX-ROUTE-03 visual port Store transaction', () => {
+  beforeEach(resetLegacyProject);
+
+  it('commits one port connection as one undo step and rejects a duplicate send', () => {
+    dawStore.getState().addBus('Group');
+    const group = dawStore.getState().buses.find(bus => bus.outputBusId != null)!;
+    dawStore.temporal.getState().clear();
+
+    dawStore.getState().connectRoutingPort({ ownerType: 'track', ownerId: 'track', port: 'out' }, group.id);
+    expect(dawStore.getState().tracks[0].outputBusId).toBe(group.id);
+    expect(dawStore.temporal.getState().pastStates).toHaveLength(1);
+    dawStore.temporal.getState().undo();
+    expect(dawStore.getState().tracks[0].outputBusId).toBe('master');
+
+    dawStore.temporal.getState().clear();
+    dawStore.getState().connectRoutingPort({ ownerType: 'track', ownerId: 'track', port: 'pre' }, group.id);
+    expect(dawStore.getState().sends).toHaveLength(1);
+    const historySize = dawStore.temporal.getState().pastStates.length;
+    dawStore.getState().connectRoutingPort({ ownerType: 'track', ownerId: 'track', port: 'pre' }, group.id);
+    expect(dawStore.getState().sends).toHaveLength(1);
+    expect(dawStore.temporal.getState().pastStates).toHaveLength(historySize);
+  });
+
+  it('rejects an update that would duplicate another Send without adding undo history', () => {
+    dawStore.getState().addBus('Group A');
+    dawStore.getState().addBus('Group B');
+    const [a, b] = dawStore.getState().buses.filter(bus => bus.outputBusId != null);
+    dawStore.getState().addSend({ sourceTrackId: 'track', targetBusId: a.id, gain: 0.5, preFader: true });
+    dawStore.getState().addSend({ sourceTrackId: 'track', targetBusId: b.id, gain: 0.5, preFader: true });
+    const second = dawStore.getState().sends[1];
+    dawStore.temporal.getState().clear();
+
+    dawStore.getState().updateSend(second.id, { targetBusId: a.id });
+
+    expect(dawStore.getState().sends.find(send => send.id === second.id)?.targetBusId).toBe(b.id);
+    expect(dawStore.temporal.getState().pastStates).toHaveLength(0);
+  });
+});

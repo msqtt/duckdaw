@@ -17,8 +17,9 @@
 | 多编排 | FR-ARR-01 | 已实现 | `editingInvariants.test.ts` |
 | 轨道/片段 | FR-TRK-01/02, FR-CLIP-01~03 | 已实现 | `editingInvariants.test.ts`, `dawStore.ts` |
 | 钢琴卷帘/量化/MIDI 录音 | FR-MIDI-01~03 | 已实现 | `midiInput.test.ts`, `PianoRoll.tsx`, `DAWApp.tsx` |
-| 音频导入/录音 | FR-AUD-01/02 | 已实现 | `recorder.test.ts`, `ArrangeView.tsx` |
+| 音频导入/录音 | FR-AUD-01/02, REC-PRO-05 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `recorder.test.ts`, `audioRecording.test.ts`, `REC-E2E-05`, `DAWApp.tsx` |
 | 混音/资源生命周期 | FR-MIX-01~03 | 已实现 | `mixSettings.test.ts`, `audioEngine.test.ts` |
+| 可视化路由/聚合通道、确定性 Solo、频谱参数 EQ | MIX-ROUTE-03, MIX-SOLO-01, PLUG-EQ-01 | 已实现；格式保持 2.1.0；完整本地门禁与独立复审 PASS，无 P0/P1 | `routingGraph.test.ts`, `routingPatch.test.ts`, `routingStore.test.ts`, `audioEngineRouting.test.ts`, `audioEngineAutomation.test.ts`, `audioEnginePlugin.test.ts`, `parametricEq.test.ts`, `pluginPersistence.test.ts`, `MIX-E2E-03` |
 | 统一 Instrument/Effect Plugin SDK | PLUG-SDK-01/02, PLUG-INST-01, PLUG-FX-01, PLUG-FMT-01, PLUG-DEV-01, PLUG-UI-01 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `08-plugin-sdk.md`；`pluginInspectorStore.test.ts`、`pluginUi.test.ts`、`PLUG-E2E-01` |
 | 通用控件 Automation | AUTO-02 | 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | `09-automation.md`；AUTO-T02-01~06、AUTO-E2E-02 |
 | 离线导出 | FR-EXP-01 | 已实现 | `exportPlan.test.ts`, `ExportModal.tsx` |
@@ -72,7 +73,13 @@
 | T-UNDO-01 | 原子加载、dirty、marker undo | FR-UI-01 | `dawStore.test.ts`, `editingInvariants.test.ts` |
 | T-MIDI-01 | Note On/Off、velocity 0、结束关闭 | FR-MIDI-03 | `midiInput.test.ts` |
 | T-MIC-01 | MIME、实际时长、输入关闭 | FR-AUD-02 | `recorder.test.ts` |
+| REC-T05-01~04 | capture→beat→play、已播放不重启、失败/取消回滚、Store 不伪造播放 | REC-PRO-05 | 已通过：`audioRecording.test.ts` 5/5；`recorder.test.ts` 3/3 |
+| REC-E2E-05 | Audio Track 录制时播放、停止录音后继续播放；Count-in 权限失败/取消回滚 | REC-PRO-05 | Chromium/Firefox/WebKit 9/9 通过；成功路径提交 Audio Clip，失败/取消 0 Clip |
 | T-MIX-01 | 共享混音参数、节点 dispose | FR-MIX-02, FR-EXP-01 | `mixSettings.test.ts`, `audioEngine.test.ts` |
+| MIX-ROUTE-T03 | OUT/PRE/POST→IN、DAG/重复/悬空拒绝、零提交、单 undo、持久化语义重复 Send 拒绝 | MIX-ROUTE-03 | `routingGraph.test.ts`, `routingPatch.test.ts`, `routingStore.test.ts` |
+| MIX-SOLO-T01 | 宿主 gate、PRE Send、Bus、Automation override 保持与 lane 禁用/删除恢复、离线同语义 | MIX-SOLO-01 | `mixSettings.test.ts`, `audioEngineRouting.test.ts`, `audioEngineAutomation.test.ts`, `ExportModal.tsx` |
+| PLUG-EQ-T01~03 | 8 band/32 参数、factory/filter/FFT fallback/dispose、Track/Bus 持久化与单手势编辑 | PLUG-EQ-01 | `parametricEq.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts` |
+| MIX-E2E-03 | 可视化端口、Bus/EQ、键盘与 pointer、undo、Solo→Bus meter、unsupported analyser fallback | MIX-ROUTE-03, MIX-SOLO-01, PLUG-EQ-01 | Chromium/Firefox/WebKit 3/3；完整矩阵 36/36 |
 | PLUG-T01~T09 | registry、参数、迁移、未知插件、共享 factory、dispose、Store/UI、内置插件 | Plugin SDK | 已通过：`pluginSdk.test.ts`, `pluginRuntime.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `projectStorage.test.ts` |
 | PLUG-T10~T12 | 三浏览器/a11y、ordered multi-instance chain 与全质量门禁 | Plugin SDK | 已通过：Playwright Chromium/Firefox/WebKit 24/24；unit 316/316、typecheck、build、size、diff 均通过 |
 | AUTO-T02-01~06 | dynamic target、ensure/undo、Track curve、plugin realtime/offline、package 往返 | AUTO-02 | 已通过：`automationControl.test.ts`, `automationWorkflow.test.ts`, `audioEngineAutomation.test.ts`, `projectStorage.test.ts` |
@@ -96,5 +103,10 @@
 [`07-next-generation-optimization.md`](./07-next-generation-optimization.md) 中的 Batch A–F 已按 SDD/TDD 完成候选实现。Batch E 的 Tempo/Automation、v2 格式、Bus/Send DAG、共享实时/离线 Mix Graph 与 export tail/normalize/limiter/stems 已由领域、Store、音频和集成测试覆盖；Batch F 的 GitHub baseline/409 事务、依赖治理、CI/CD、部署 metadata 和真实浏览器工作流已完成。
 
 `0.3.0-rc.1` 本地候选证据：42 个 Vitest 文件、278 项测试通过；Chromium/Firefox/WebKit Playwright 组合矩阵 18/18 通过；TypeScript no-emit、生产构建、冻结 bundle budget、`npm audit`（0 vulnerabilities）和 `git diff --check` 通过；独立发布审查及 FFmpeg GPL notice 复审确认无未关闭 P0/P1。远端 CI、Netlify staging branch deploy、`daw-sit.msqt.fun` DNS/TLS/metadata/SPA/cache smoke 属于提交后的 staging 门禁，必须记录实际远端结果后才可声明预发部署完成。
+
+
+REC-PRO-05 最终证据（2026-08-24）：目标录音/Count-in/Store 回归 53/53；全量 Vitest 51 files、322/322；TypeScript no-emit、production build、`git diff --check` 通过；bundle 为 DAWApp 394.38/400 KiB、Tone 263.30/300 KiB、React 189.40/220 KiB、ExportModal 19.63/40 KiB；完整 Playwright Chromium/Firefox/WebKit 33/33，其中 REC-E2E-05 9/9。首次独立调用链复审发现 Count-in 启动后权限失败未回滚 Transport 的 P1，修复为仅回滚本次 Count-in 启动的播放并恢复原播放头；二次复审 **PASS，无 P0/P1**，仅记录非阻断 P3。
+
+Batch E2 最终证据：全量 Vitest 53 files、336/336；TypeScript no-emit、production build、`npm audit`（0 vulnerabilities）与 `git diff --check` 通过；bundle 为 DAWApp 399.30/400 KiB、Tone 267.40/300 KiB、React 189.40/220 KiB、ExportModal 19.93/40 KiB、daw-domain 10.73/40 KiB、duckdaw-plugins 12.39/40 KiB。`MIX-E2E-03` Chromium/Firefox/WebKit 3/3，CI 等价单 worker/2 retries 完整矩阵 36/36 且最终运行未发生实际 retry。三轮独立调用链复审依次关闭 PRE Send gate、FFT fallback、Automation 跨图保持、lane 禁用/删除 override 清理及持久化重复 Send，最终结论 **PASS，无 P0/P1**。远端 CI、staging 部署和 DNS/TLS 不属于本地实现完成证据，仍按发布门禁单独验证。
 
 历史资料仍按 `docs/specs/README.md` 的权威顺序处理，不覆盖本矩阵。

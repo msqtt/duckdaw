@@ -70,6 +70,20 @@ describe('MicRecorder', () => {
     now.mockRestore();
   });
 
+  it('releases the opened input when MediaRecorder startup fails', async () => {
+    vi.stubGlobal('MediaRecorder', class {
+      constructor() {
+        throw new Error('recorder unavailable');
+      }
+    });
+    const recorder = new MicRecorder();
+
+    await expect(recorder.start()).rejects.toThrow('recorder unavailable');
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(recorder.mediaRecorder).toBeNull();
+  });
+
   it('returns null when no recording is active', async () => {
     await expect(new MicRecorder().stop()).resolves.toBeNull();
   });

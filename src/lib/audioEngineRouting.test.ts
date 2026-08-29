@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const disposed = vi.hoisted(() => ({ gain: vi.fn(), channel: vi.fn() }));
+const disposed = vi.hoisted(() => ({ gain: vi.fn(), channel: vi.fn(), createdChannels: [] as Array<{ mute: boolean; solo: boolean }> }));
 
 vi.mock('tone', () => {
   class Param {
@@ -26,6 +26,7 @@ vi.mock('tone', () => {
   }
   class Channel extends BaseNode {
     volume = new Param(); pan = new Param(); mute = false; solo = false;
+    constructor() { super(); disposed.createdChannels.push(this); }
     dispose() { disposed.channel(); }
   }
   class Wet extends BaseNode { wet = new Param(); }
@@ -77,5 +78,40 @@ describe('AudioEngine shared routing runtime', () => {
     engine.syncRouting(tracks, buses, []);
     expect(engine.sendGains.size).toBe(0);
     expect(disposed.gain).toHaveBeenCalled();
+  });
+});
+
+
+describe('MIX-SOLO-01 host solo isolation', () => {
+  it('mutes non-solo tracks without enabling Tone global solo on track or bus channels', () => {
+    disposed.createdChannels.length = 0;
+    const tracks: Track[] = [
+      {
+        id: 'solo', name: 'Solo', type: 'audio', volume: 1, pan: 0,
+        isMuted: false, isSolo: true, color: '#fff', reverb: 0, delay: 0,
+        automationLanes: [], outputBusId: 'group',
+      },
+      {
+        id: 'other', name: 'Other', type: 'audio', volume: 1, pan: 0,
+        isMuted: false, isSolo: false, color: '#fff', reverb: 0, delay: 0,
+        automationLanes: [], outputBusId: 'group',
+      },
+    ];
+    const buses: Bus[] = [
+      { id: 'master', name: 'Master', volume: 1, pan: 0, isMuted: false, effects: [], outputBusId: null },
+      { id: 'group', name: 'Group', volume: 1, pan: 0, isMuted: false, effects: [], outputBusId: 'master' },
+    ];
+
+    const sends: Send[] = [{ id: 'pre-leak-check', sourceTrackId: 'other', targetBusId: 'master', gain: 0.5, preFader: true }];
+    engine.syncTracks(tracks);
+    engine.syncRouting(tracks, buses, sends);
+
+    expect(engine.trackAudibilityGains.get('solo')?.gain.value).toBe(1);
+    expect(engine.trackAudibilityGains.get('other')?.gain.value).toBe(0);
+    expect(engine.channels.get('solo')).toMatchObject({ mute: false, solo: false });
+    expect(engine.channels.get('other')).toMatchObject({ mute: false, solo: false });
+    expect((engine.trackAudibilityGains.get('other') as any)?.connections).toContain(engine.sendGains.get('send:pre-leak-check'));
+    expect([...engine.busChannels.values()].every(channel => channel.solo === false)).toBe(true);
+    expect([...engine.busChannels.values()].every(channel => channel.mute === false)).toBe(true);
   });
 });

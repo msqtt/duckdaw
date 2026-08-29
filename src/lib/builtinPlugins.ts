@@ -1,5 +1,9 @@
 import * as Tone from 'tone';
 import {
+  createEqParameterDefinitions,
+  readEqBands,
+} from './parametricEq';
+import {
   PluginRegistry,
   duckDawPluginRegistry,
   type EffectPluginDefinition,
@@ -100,6 +104,62 @@ function createEffectInstance<T extends Tone.ToneAudioNode>(
       disposed = true;
       node.disconnect?.();
       node.dispose();
+    },
+  };
+}
+
+function createParametricEqInstance(parameters: Record<string, PluginParameterValue>): EffectPluginInstance {
+  const input = new Tone.Gain();
+  const output = new Tone.Gain();
+  const filters = Array.from({ length: 8 }, () => new Tone.Filter({ type: 'peaking', frequency: 1000, gain: 0, Q: 1 }));
+  let fft: Tone.FFT | null = null;
+  let pendingFft: Tone.FFT | null = null;
+  try {
+    pendingFft = new Tone.FFT({ size: 256, smoothing: 0.8, normalRange: false });
+    output.connect(pendingFft);
+    fft = pendingFft;
+  } catch {
+    pendingFft?.dispose();
+    fft = null;
+  }
+  input.chain(...filters, output);
+  let disposed = false;
+  const apply = (next: Record<string, PluginParameterValue>) => {
+    for (const band of readEqBands(next)) {
+      const filter = filters[band.index];
+      filter.frequency.value = band.frequency;
+      filter.gain.value = band.enabled ? band.gain : 0;
+      filter.Q.value = band.q;
+    }
+  };
+  apply(parameters);
+  return {
+    node: input,
+    inputNode: input,
+    outputNode: output,
+    prepareReconnect: () => {
+      if (disposed) return;
+      output.disconnect();
+      if (fft) output.connect(fft);
+    },
+    setParameters: next => {
+      if (!disposed) apply(next);
+    },
+    getFrequencyData: () => {
+      if (disposed || !fft) return undefined;
+      try {
+        return new Float32Array(fft.getValue());
+      } catch {
+        return undefined;
+      }
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      filters.forEach(filter => filter.dispose());
+      input.dispose();
+      output.dispose();
+      fft?.dispose();
     },
   };
 }
@@ -268,6 +328,12 @@ export const builtInEffectPlugins: readonly EffectPluginDefinition[] = [
         node.wet.value = numeric(next, 'wet', 1);
       }, parameters);
     },
+  },
+  {
+    id: 'duckdaw.effect.parametric-eq', version: '1.0.0', kind: 'effect', name: 'Spectrum Parametric EQ',
+    description: 'Eight-band visual parametric equalizer with realtime FFT analysis.',
+    parameters: createEqParameterDefinitions(),
+    create: parameters => createParametricEqInstance(parameters),
   },
 ];
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useDAWStore, Track } from '../../store/dawStore';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { engine } from '../../lib/audioEngine';
@@ -8,6 +8,7 @@ import { getDefaultPluginRegistry } from '../../lib/pluginRuntime';
 import { movePluginInChain } from '../../lib/pluginUi';
 import { usePluginInspectorStore } from '../../store/pluginInspectorStore';
 import { AutomationCreateButton } from './AutomationCreateButton';
+import { RoutingGraph } from './RoutingGraph';
 
 const pluginRegistry = getDefaultPluginRegistry();
 const effectDefinitions = pluginRegistry.list('effect');
@@ -223,6 +224,44 @@ function MixerChannel({ track }: { track: Track, key?: React.Key }) {
   );
 }
 
+function BusMixerChannel({ bus }: { bus: import('../../lib/routingGraph').Bus; key?: React.Key }) {
+  const updateBus = useDAWStore(state => state.updateBus);
+  const deleteBus = useDAWStore(state => state.deleteBus);
+  const meterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let animationFrameId = 0;
+    const updateMeter = () => {
+      const level = engine.getBusMeter(bus.id)?.getValue();
+      const dbValue = Array.isArray(level) ? level[0] : level;
+      const db = typeof dbValue === 'number' && Number.isFinite(dbValue) ? dbValue : -100;
+      if (meterRef.current) meterRef.current.style.height = `${Math.max(0, Math.min(100, (db + 60) * (100 / 60)))}%`;
+      animationFrameId = requestAnimationFrame(updateMeter);
+    };
+    updateMeter();
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [bus.id]);
+
+  return (
+    <div data-testid="bus-mixer-channel" data-bus-id={bus.id} className="flex h-full w-32 shrink-0 flex-col items-center border-r border-violet-500/30 bg-violet-50/40 py-2 dark:bg-violet-950/10">
+      <div className="mb-2 flex w-full items-center gap-1 px-2">
+        <span className="min-w-0 flex-1 truncate text-center text-xs font-bold text-violet-600" title={bus.name}>{bus.name}</span>
+        <button type="button" aria-label={`Delete bus ${bus.name}`} onClick={() => deleteBus(bus.id)} className="text-neutral-400 hover:text-red-500">×</button>
+      </div>
+      <div className="mb-2 w-full px-2">
+        <PluginChainEditor ownerType="bus" ownerId={bus.id} ownerName={bus.name} plugins={bus.effectPlugins ?? []} onChange={effectPlugins => updateBus(bus.id, { effectPlugins })} />
+      </div>
+      <button type="button" aria-label={`Mute ${bus.name}`} aria-pressed={bus.isMuted} onClick={() => updateBus(bus.id, { isMuted: !bus.isMuted })} className={`mb-3 h-6 w-8 rounded text-xs font-bold ${bus.isMuted ? 'bg-orange-500 text-white' : 'bg-neutral-300 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300'}`}>M</button>
+      <div className="relative flex min-h-[100px] flex-1 justify-center gap-5">
+        <div className="flex h-full w-1.5 flex-col justify-end overflow-hidden rounded bg-neutral-300 dark:bg-neutral-800"><div ref={meterRef} data-testid="bus-meter-level" data-bus-id={bus.id} className="w-full bg-gradient-to-t from-emerald-500 via-amber-400 to-red-500" style={{ height: '0%' }} /></div>
+        <input type="range" min="0" max="1" step="0.01" value={bus.volume} aria-label={`Bus volume ${bus.name}`} aria-valuetext={`${Math.round(bus.volume * 100)}%`} onChange={event => updateBus(bus.id, { volume: Number(event.target.value) })} className="h-full w-1.5 accent-violet-500" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }} />
+      </div>
+      <div className="mt-3 w-full px-2 text-center text-[9px] text-neutral-500">PAN</div>
+      <input type="range" min="-1" max="1" step="0.01" value={bus.pan} aria-label={`Bus pan ${bus.name}`} aria-valuetext={bus.pan === 0 ? 'Center' : `${Math.round(bus.pan * 100)}`} onChange={event => updateBus(bus.id, { pan: Number(event.target.value) })} className="mx-2 w-24 accent-violet-500" />
+    </div>
+  );
+}
+
 function MasterChannel() {
   const masterVolume = useDAWStore(state => state.masterVolume);
   const setMasterVolume = useDAWStore(state => state.setMasterVolume);
@@ -278,151 +317,10 @@ function MasterChannel() {
 
 export function Mixer() {
 
-function RoutingControls() {
-  const {
-    tracks, buses, sends, addBus, updateBus, deleteBus, setTrackOutputBus,
-    addSend, updateSend, deleteSend,
-  } = useDAWStore(useShallow(state => ({
-    tracks: state.tracks,
-    buses: state.buses,
-    sends: state.sends,
-    addBus: state.addBus,
-    updateBus: state.updateBus,
-    deleteBus: state.deleteBus,
-    setTrackOutputBus: state.setTrackOutputBus,
-    addSend: state.addSend,
-    updateSend: state.updateSend,
-    deleteSend: state.deleteSend,
-  })));
-  const [busName, setBusName] = useState('');
-
-  return (
-    <section className="max-h-32 overflow-auto border-b border-neutral-300 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 p-2 text-[10px]" aria-label="Bus and send routing">
-      <div className="flex items-center gap-2 mb-2">
-        <strong>ROUTING</strong>
-        <label className="sr-only" htmlFor="new-bus-name">New bus name</label>
-        <input
-          id="new-bus-name"
-          value={busName}
-          onChange={event => setBusName(event.target.value)}
-          className="h-6 w-28 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-1"
-          placeholder="Group / FX bus"
-        />
-        <button
-          type="button"
-          className="h-6 rounded bg-emerald-600 px-2 text-white disabled:opacity-50"
-          disabled={!busName.trim()}
-          onClick={() => { addBus(busName); setBusName(''); }}
-        >Add Bus</button>
-      </div>
-      <div className="grid gap-2 lg:grid-cols-2">
-        <div className="space-y-1" aria-label="Track outputs">
-          {tracks.map(track => (
-            <div key={track.id} className="flex items-center gap-1">
-              <span className="w-20 truncate" title={track.name}>{track.name}</span>
-              <label className="sr-only" htmlFor={`output-${track.id}`}>Output bus for {track.name}</label>
-              <select
-                id={`output-${track.id}`}
-                value={track.outputBusId ?? buses.find(bus => bus.outputBusId == null)?.id}
-                onChange={event => setTrackOutputBus(track.id, event.target.value)}
-                className="h-5 max-w-24 rounded bg-white dark:bg-neutral-800"
-              >
-                {buses.map(bus => <option key={bus.id} value={bus.id}>{bus.name}</option>)}
-              </select>
-              <label className="sr-only" htmlFor={`send-${track.id}`}>Add send from {track.name}</label>
-              <select
-                id={`send-${track.id}`}
-                value=""
-                onChange={event => {
-                  if (!event.target.value) return;
-                  addSend({ sourceTrackId: track.id, targetBusId: event.target.value, gain: 0.5, preFader: false });
-                }}
-                className="h-5 max-w-24 rounded bg-white dark:bg-neutral-800"
-              >
-                <option value="">+ Send</option>
-                {buses.map(bus => <option key={bus.id} value={bus.id}>{bus.name}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
-        <div className="space-y-1" aria-label="Bus outputs">
-          {buses.map(bus => (
-            <div key={bus.id} className="flex items-center gap-1">
-              <span className="w-20 truncate font-semibold" title={bus.name}>{bus.name}</span>
-              {bus.outputBusId == null ? <span>Destination</span> : (
-                <>
-                  <label className="sr-only" htmlFor={`bus-output-${bus.id}`}>Output for {bus.name}</label>
-                  <select
-                    id={`bus-output-${bus.id}`}
-                    value={bus.outputBusId}
-                    onChange={event => updateBus(bus.id, { outputBusId: event.target.value })}
-                    className="h-5 max-w-24 rounded bg-white dark:bg-neutral-800"
-                  >
-                    {buses.filter(candidate => candidate.id !== bus.id).map(candidate => (
-                      <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={() => deleteBus(bus.id)} aria-label={`Delete bus ${bus.name}`} className="text-red-500">×</button>
-                </>
-              )}
-              <label className="sr-only" htmlFor={`bus-send-${bus.id}`}>Add send from {bus.name}</label>
-              <select
-                id={`bus-send-${bus.id}`}
-                value=""
-                onChange={event => {
-                  if (!event.target.value) return;
-                  addSend({ sourceBusId: bus.id, targetBusId: event.target.value, gain: 0.5, preFader: false });
-                }}
-                className="h-5 max-w-24 rounded bg-white dark:bg-neutral-800"
-              >
-                <option value="">+ Send</option>
-                {buses.filter(candidate => candidate.id !== bus.id).map(candidate => (
-                  <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
-                ))}
-              </select>
-              <input type="range" min="0" max="1" step="0.01" value={bus.volume} aria-label={`Bus volume ${bus.name}`} onChange={event => updateBus(bus.id, { volume: Number(event.target.value) })} className="w-12" />
-              <input type="range" min="-1" max="1" step="0.01" value={bus.pan} aria-label={`Bus pan ${bus.name}`} onChange={event => updateBus(bus.id, { pan: Number(event.target.value) })} className="w-12" />
-              <button type="button" aria-label={`Mute ${bus.name}`} aria-pressed={bus.isMuted} onClick={() => updateBus(bus.id, { isMuted: !bus.isMuted })} className={bus.isMuted ? 'text-orange-500' : ''}>M</button>
-              <PluginChainEditor
-                ownerType="bus"
-                ownerId={bus.id}
-                ownerName={bus.name}
-                plugins={bus.effectPlugins ?? []}
-                onChange={effectPlugins => updateBus(bus.id, { effectPlugins })}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-      {sends.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2" aria-label="Active sends">
-          {sends.map(send => {
-            const source = send.sourceTrackId
-              ? tracks.find(track => track.id === send.sourceTrackId)?.name
-              : buses.find(bus => bus.id === send.sourceBusId)?.name;
-            const target = buses.find(bus => bus.id === send.targetBusId)?.name;
-            return (
-              <div key={send.id} className="flex items-center gap-1 rounded bg-neutral-200 dark:bg-neutral-800 px-1">
-                <span>{source} → {target}</span>
-                <input
-                  type="range" min="0" max="1" step="0.01" value={send.gain}
-                  aria-label={`Send gain ${source} to ${target}`}
-                  onChange={event => updateSend(send.id, { gain: Number(event.target.value) })}
-                  className="w-16"
-                />
-                <label><input type="checkbox" checked={send.preFader} onChange={event => updateSend(send.id, { preFader: event.target.checked })} /> Pre</label>
-                <button type="button" onClick={() => deleteSend(send.id)} aria-label={`Delete send ${source} to ${target}`} className="text-red-500">×</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-  const { tracks, bottomPanel, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore(useShallow(state => ({
+function RoutingControls() { return <RoutingGraph />; }
+  const { tracks, buses, setBottomPanel, panelHeight, panelFullScreen, setPanelHeight, setPanelFullScreen } = useDAWStore(useShallow(state => ({
       tracks: state.tracks,
-      bottomPanel: state.bottomPanel,
+      buses: state.buses,
       setBottomPanel: state.setBottomPanel,
       panelHeight: state.panelHeight,
       panelFullScreen: state.panelFullScreen,
@@ -458,12 +356,14 @@ function RoutingControls() {
         <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300">MIXER</span>
         <div className="flex items-center gap-2">
             <button 
+              aria-label={panelFullScreen ? 'Exit full screen mixer' : 'Full screen mixer'}
               onClick={() => setPanelFullScreen(!panelFullScreen)}
               className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
             >
               {panelFullScreen ? '↙' : '↗'}
             </button>
             <button 
+              aria-label="Close mixer"
               onClick={() => setBottomPanel(null)}
               className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white mb-1 leading-none text-lg font-mono font-bold ml-2"
             >
@@ -475,6 +375,9 @@ function RoutingControls() {
       <div className="flex flex-1 overflow-x-auto custom-scrollbar bg-neutral-50 dark:bg-neutral-950 pr-4">
          {tracks.map(track => (
            <MixerChannel key={track.id} track={track} />
+         ))}
+         {buses.filter(bus => bus.outputBusId != null).map(bus => (
+           <BusMixerChannel key={bus.id} bus={bus} />
          ))}
          <MasterChannel />
       </div>

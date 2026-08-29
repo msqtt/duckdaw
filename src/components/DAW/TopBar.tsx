@@ -540,7 +540,7 @@ export function TopBar() {
              />
           </div>
           <div className="w-px h-6 bg-neutral-400 dark:bg-neutral-700" />
-          <div className="font-mono w-20 text-center text-sm font-semibold tracking-wider tabular-nums">
+          <div data-testid="transport-time" className="font-mono w-20 text-center text-sm font-semibold tracking-wider tabular-nums">
              {currentTime}
           </div>
         </div>

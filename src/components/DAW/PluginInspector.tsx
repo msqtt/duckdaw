@@ -7,6 +7,7 @@ import { getDefaultPluginRegistry } from '../../lib/pluginRuntime';
 import type { PluginInstanceDescriptor, PluginParameterDefinition } from '../../lib/pluginSdk';
 import type { AutomationTarget } from '../../lib/automation';
 import { AutomationCreateButton } from './AutomationCreateButton';
+import { ParametricEqEditor } from './ParametricEqEditor';
 
 const pluginRegistry = getDefaultPluginRegistry();
 
@@ -184,6 +185,14 @@ export function PluginInspector() {
         </section>
 
         {available ? (
+          plugin.pluginId === 'duckdaw.effect.parametric-eq' && target.kind === 'effect' ? (
+            <ParametricEqEditor
+              ownerType={target.ownerType}
+              ownerId={target.ownerId}
+              plugin={plugin}
+              onChange={updatePlugin}
+            />
+          ) : (
           <section className="space-y-4" aria-label={`${definition.name} parameters`}>
             {definition.parameters.length === 0 && <p className="text-xs text-neutral-500">This plugin has no editable parameters.</p>}
             {definition.parameters.map(parameter => (
@@ -203,6 +212,7 @@ export function PluginInspector() {
               />
             ))}
           </section>
+          )
         ) : (
           <div role="status" className="rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
             The descriptor is preserved, but this plugin is not registered in the current build.

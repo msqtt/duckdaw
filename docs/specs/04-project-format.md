@@ -146,7 +146,7 @@ interface TrackV2 {
 }
 ```
 
-Audio Track 不得包含有行为意义的 `instrument/env/instrumentPlugin`。2.1 loader 优先使用结构有效的 `instrumentPlugin`；缺失时把 legacy instrument 映射为 `duckdaw.instrument.synth|keys|bass|drums` 并复制 envelope 参数。未知但结构有效的 plugin descriptor 必须保留：Instrument 运行时回退内置 synth，Effect 运行时 bypass；未知值不得在保存时丢失。`effectPlugins` 按数组顺序串联，实例 ID 在同一工程内唯一。完整 registry、参数和失败语义见 `08-plugin-sdk.md`。
+Audio Track 不得包含有行为意义的 `instrument/env/instrumentPlugin`。2.1 loader 优先使用结构有效的 `instrumentPlugin`；缺失时把 legacy instrument 映射为 `duckdaw.instrument.synth|keys|bass|drums` 并复制 envelope 参数。未知但结构有效的 plugin descriptor 必须保留：Instrument 运行时回退内置 synth，Effect 运行时 bypass；未知值不得在保存时丢失。`effectPlugins` 按数组顺序串联，实例 ID 在同一工程内唯一。完整 registry、参数和失败语义见 `08-plugin-sdk.md`。内置 `duckdaw.effect.parametric-eq` 使用现有 `parameters: Record<string, number|string>` 保存最多 8 个固定 band slot（enabled/frequency/gain/Q）；它不增加 Track/Bus 字段、不改变 `2.1.0` 版本，缺失该 descriptor 的旧工程无需迁移。
 
 ### 4.4 Clip 与 Note
 

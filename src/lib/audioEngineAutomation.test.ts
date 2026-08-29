@@ -8,6 +8,7 @@ const calls = vi.hoisted(() => ({
   volumeSet: vi.fn(),
   volumeLinear: vi.fn(),
   pluginParameters: vi.fn(),
+  gains: [] as Array<{ value: number }>,
 }));
 
 vi.mock('tone', () => {
@@ -38,7 +39,14 @@ vi.mock('tone', () => {
     Meter: class extends BaseNode {},
     Reverb: class extends WetNode {},
     FeedbackDelay: class extends WetNode {},
-    Gain: class extends BaseNode { gain = new Param(); },
+    Gain: class extends BaseNode {
+      gain = new Param();
+      constructor(value = 1) {
+        super();
+        this.gain.value = value;
+        calls.gains.push(this.gain);
+      }
+    },
     UserMedia: class extends BaseNode { async open() {}; close() {} },
     PolySynth: class extends BaseNode { set() {}; triggerAttackRelease() {} },
     Synth: class extends BaseNode {},
@@ -133,7 +141,77 @@ describe('AudioEngine tempo and automation scheduling', () => {
 });
 
 
-describe('AUTO-T02 plugin parameter automation', () => {
+describe('AudioEngine control and plugin automation', () => {
+  it('recomputes every host audibility gate for scheduled Solo and Mute automation', () => {
+    const localEngine = new AudioEngine();
+    const first: Track = {
+      id: 'first', name: 'First', type: 'audio', volume: 1, pan: 0,
+      isMuted: false, isSolo: false, color: '#fff', reverb: 0, delay: 0,
+      automationLanes: [],
+    };
+    const second: Track = {
+      ...first,
+      id: 'second',
+      name: 'Second',
+    };
+
+    const gainStart = calls.gains.length;
+    localEngine.syncTracks([first, second]);
+    const trackGains = calls.gains.slice(gainStart);
+    const firstAudibility = trackGains[1];
+    const secondAudibility = trackGains[3];
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 1]);
+
+    calls.schedules.length = 0;
+    const soloTrack: Track = {
+      ...first,
+      automationLanes: [{
+        id: 'solo-lane', target: 'track.solo', enabled: true, valueType: 'discrete',
+        points: [
+          { id: 'solo-off', beat: 0, value: 0, curve: 'step' },
+          { id: 'solo-on', beat: 1, value: 1, curve: 'step' },
+        ],
+      }],
+    };
+    localEngine.syncAutomation([soloTrack, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 1]);
+    expect(calls.schedules).toHaveLength(1);
+    calls.schedules[0].callback(0.5);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 0]);
+
+    localEngine.syncTracks([{ ...first, volume: 0.8 }, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 0]);
+    localEngine.syncAutomation([soloTrack, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 0]);
+
+    calls.schedules.length = 0;
+    const mutedSoloTrack: Track = {
+      ...first,
+      automationLanes: [{
+        id: 'mute-lane', target: 'track.mute', enabled: true, valueType: 'discrete',
+        points: [
+          { id: 'mute-off', beat: 0, value: 0, curve: 'step' },
+          { id: 'mute-on', beat: 1, value: 1, curve: 'step' },
+        ],
+      }],
+    };
+    localEngine.syncAutomation([mutedSoloTrack, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 1]);
+    expect(calls.schedules).toHaveLength(1);
+    calls.schedules[0].callback(0.5);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([0, 1]);
+
+    localEngine.syncAutomation([{
+      ...mutedSoloTrack,
+      automationLanes: [{ ...mutedSoloTrack.automationLanes[0], enabled: false }],
+    }, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 1]);
+    localEngine.syncAutomation([first, second]);
+    expect([firstAudibility.value, secondAudibility.value]).toEqual([1, 1]);
+
+    localEngine.syncAutomation([]);
+    localEngine.syncTracks([]);
+  });
   it('resolves an instrument by descriptor instance ID and merges scheduled parameter values', () => {
     const registry = new PluginRegistry();
     registry.register({

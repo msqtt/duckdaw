@@ -132,7 +132,10 @@
 ### FR-AUD-02 麦克风录音 — 已实现（安全上下文/权限受限）
 - 要求目标 Audio Track；权限或录制失败恢复 UI 并 Toast。
 - 记录开始 beat，停止返回 URL/MIME/实际秒时长，按 BPM 换算 duration beats 后创建可保存 Audio Clip。
-- 证据：`recorder.test.ts` 覆盖时长/MIME/关闭输入；`DAWApp.tsx` 完成目标与提交。
+- **REC-PRO-05 边播放边录制**：从停止状态开始 Audio Track 录音时，必须先成功启动 `MediaRecorder`，再从当前播放头启动 Transport；录音期间其他未静音 Track、节拍器、Loop 与 Automation 按正常实时图继续播放。若 Transport 已在播放，不得 stop、pause、seek 或重复 start，录音起点必须在麦克风授权及 `MediaRecorder.start()` 成功后按当时 Transport beat 采样。
+- 停止单轨录音只结束采集并一次提交 Audio Clip，Transport 保持原播放状态；全局 Stop 仍同时停止 Transport 与录音。录音输入默认不直通 Master，避免扬声器回授。
+- Count-in 期间允许工程播放但尚不采集；取消必须阻止稍后启动。权限/设备/`MediaRecorder` 失败不得创建 Clip、不得把原本停止的 Transport 启动；原本已播放的 Transport 不受失败影响。停止或失败必须释放输入、analyser 与 recorder 资源；本行为不改变工程持久化格式。
+- 证据：`recorder.test.ts` 覆盖时长/MIME/关闭输入；`audioRecording.test.ts` 覆盖 capture→beat→play 顺序、已播放不重启、失败不启动；`DAWApp.tsx` 完成目标、Transport 与提交调用链；`REC-E2E-05` 覆盖浏览器可见录制时播放与停止后继续播放。
 
 ## 6. 混音与音频引擎
 
@@ -148,6 +151,21 @@
 ### FR-MIX-03 节拍器 — 已实现
 - 支持开关、音量、四种音色、1x/2x/4x 细分和实际拍号的小节首拍重音；右键设置、单击切换。
 - 证据：`audioEngine.ts`、`TopBar.tsx`、`time.test.ts`。
+
+### MIX-ROUTE-03 可视化路由与聚合通道 — 已实现
+- Mixer 必须以可缩放/滚动的节点连线图呈现 Track、Bus/Group 与 Destination。每个源节点暴露 `OUT`、`PRE`、`POST` 端口，每个 Bus 暴露 `IN`；拖拽或键盘选择源端口再选择 `IN` 可创建连接，已有 Output 与 Send 以不同线型/颜色显示。Send 可选择删除；必需的 Output 只能重新接到另一 Bus，不能形成悬空源。
+- `Track OUT → Bus IN` 调用 `setTrackOutputBus`；`Bus OUT → Bus IN` 调用 `updateBus(outputBusId)`；`Track/Bus PRE|POST → Bus IN` 调用 `addSend(preFader)`。非法自连、悬空端点、重复 Send、指向同一目标的 Output 冗余操作和任何环必须拒绝且不改变工程；每次有效连接/删除是一个 undo 事务。
+- 用户可新建非 Destination Bus 作为聚合混音通道；它默认输出到唯一 Destination Bus，并在 Mixer 中拥有完整的音量、声像、Mute、电平与有序 Effect Plugin 链。被 Track/Bus/Send 引用时不可删除；移除引用后可删除并释放实时节点/插件。
+- 本能力复用 v2.1 `Track.outputBusId`、`Bus`、`Send` 与 `effectPlugins`，不升级格式。旧工程仍迁移到唯一 Master Bus；加载或编辑失败保留最后有效图。
+
+### MIX-SOLO-01 确定性独奏 — 已实现
+- Solo 判定由宿主集中计算：没有 Solo 时播放所有未 Mute Track；存在一个或多个 Solo 时，仅播放 `isSolo && !isMuted` 的 Track。不得使用 Tone 全局 Solo 使中间 Bus、Send 或 Destination 被连带静音。
+- 多 Solo、Solo+Mute、Track 直达 Master、经过多级 Bus、Pre/Post Send 必须一致；Bus 自身 Mute 仍在 Track Solo 判定后生效。实时播放、Track Solo Automation 与离线导出共享同一判定语义。
+
+### PLUG-EQ-01 可视化频谱参数均衡器 — 已实现
+- 提供内置 `duckdaw.effect.parametric-eq`，可挂载到 Track 或 Bus 的任意效果槽；实时和离线使用同一 factory 与最多 8 个 peaking bands，点参数为 enabled/frequency/gain/Q。
+- Inspector 显示实时 FFT 频谱和对数频率 EQ 曲线。单击空白处增加点，指针拖拽修改频率/增益，选中点可调 Q 或删除；频率限制 `20..20000 Hz`、增益 `-24..24 dB`、Q `0.1..18`，超过 8 点时拒绝新增。每次添加、删除或一次拖拽手势只形成一个可撤销事务。
+- 频谱不可用、页面后台或离线渲染时 EQ 音频处理仍正常，UI 显示静态曲线而不报错；Inspector 关闭、插件删除、图重建和导出完成必须停止 animation frame 并 dispose FFT/Filter 节点。参数使用现有 v2.1 descriptor number 值持久化，未知/旧工程无需迁移。
 
 ## 7. 导出
 

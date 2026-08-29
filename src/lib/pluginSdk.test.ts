@@ -179,7 +179,7 @@ describe('legacy plugin migration', () => {
 });
 
 describe('built-in plugin catalog', () => {
-  it('contains five instruments and five effects with stable IDs', () => {
+  it('contains five instruments and six effects with stable IDs', () => {
     const registry = createBuiltInPluginRegistry();
     expect(registry.list('instrument').map(item => item.id)).toEqual([
       'duckdaw.instrument.bass',
@@ -193,6 +193,7 @@ describe('built-in plugin catalog', () => {
       'duckdaw.effect.delay',
       'duckdaw.effect.distortion',
       'duckdaw.effect.limiter',
+      'duckdaw.effect.parametric-eq',
       'duckdaw.effect.reverb',
     ]);
   });

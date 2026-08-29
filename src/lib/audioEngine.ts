@@ -2,7 +2,7 @@ import * as Tone from 'tone';
 import { Clip, Track } from '../store/dawStore';
 import { beatsToTransportPosition, type TimeSignature } from './time';
 import { MicRecorder } from './recorder';
-import { createTrackMixSettings } from './mixSettings';
+import { createTrackMixSettings, resolveTrackAudibility } from './mixSettings';
 import { measurePerf } from './performance';
 import { computeClipPlaybackPlan, createFadeValueCurve } from './audioEditing';
 import { type TempoPoint, beatsToSecondsWithTempoMap } from './tempoMap';
@@ -30,17 +30,24 @@ export class AudioEngine {
   trackEffectInstancesById: Map<string, Map<string, EffectPluginInstance>>;
   pluginAutomationParameters: Map<string, Record<string, PluginParameterValue>>;
   busEffectInstances: Map<string, EffectPluginInstance[]>;
+  busEffectInstancesById: Map<string, Map<string, EffectPluginInstance>>;
   audioPlayers: Map<string, Tone.Player>;
   clipGains: Map<string, Tone.Gain>;
   clipEnvelopeScheduleIds: Map<string, number>;
   channels: Map<string, Tone.Channel>;
   trackInputs: Map<string, Tone.Gain>;
+  trackAudibilityGains: Map<string, Tone.Gain>;
   busInputs: Map<string, Tone.Gain>;
   busChannels: Map<string, Tone.Channel>;
   busOutputs: Map<string, Tone.Gain>;
+  busMeters: Map<string, Tone.Meter>;
   busEffectNodes: Map<string, Tone.ToneAudioNode[]>;
   sendGains: Map<string, Tone.Gain>;
   meters: Map<string, Tone.Meter>;
+  private trackStoreMuteStates: Map<string, boolean>;
+  private trackStoreSoloStates: Map<string, boolean>;
+  private trackAutomationMuteStates: Map<string, boolean>;
+  private trackAutomationSoloStates: Map<string, boolean>;
   partMap: Map<string, Tone.Part>;
   reverbs: Map<string, Tone.Reverb>;
   delays: Map<string, Tone.FeedbackDelay>;
@@ -56,6 +63,7 @@ export class AudioEngine {
   timeSignature: TimeSignature;
   private tempoScheduleIds: number[] = [];
   private automationScheduleIds: Map<string, number[]> = new Map();
+  private automationSignature = '';
   private currentTempoTrack: TempoPoint[] = [];
   private currentRoutingPlan: MixGraphPlan | null = null;
   private readonly pluginRegistry: PluginRegistry;
@@ -68,17 +76,24 @@ export class AudioEngine {
     this.trackEffectInstancesById = new Map();
     this.pluginAutomationParameters = new Map();
     this.busEffectInstances = new Map();
+    this.busEffectInstancesById = new Map();
     this.audioPlayers = new Map();
     this.clipGains = new Map();
     this.clipEnvelopeScheduleIds = new Map();
     this.channels = new Map();
     this.trackInputs = new Map();
+    this.trackAudibilityGains = new Map();
     this.busInputs = new Map();
     this.busChannels = new Map();
     this.busOutputs = new Map();
+    this.busMeters = new Map();
     this.busEffectNodes = new Map();
     this.sendGains = new Map();
     this.meters = new Map();
+    this.trackStoreMuteStates = new Map();
+    this.trackStoreSoloStates = new Map();
+    this.trackAutomationMuteStates = new Map();
+    this.trackAutomationSoloStates = new Map();
     this.partMap = new Map();
     this.reverbs = new Map();
     this.delays = new Map();
@@ -95,6 +110,22 @@ export class AudioEngine {
 
   getMeter(trackId: string): Tone.Meter | undefined {
       return this.meters.get(trackId);
+  }
+
+  getBusMeter(busId: string): Tone.Meter | undefined {
+      return this.busMeters.get(busId);
+  }
+
+  getEffectFrequencyData(ownerType: 'track' | 'bus', ownerId: string, instanceId: string): Float32Array | undefined {
+    const instance = ownerType === 'track'
+      ? this.trackEffectInstancesById.get(ownerId)?.get(instanceId)
+      : this.busEffectInstancesById.get(ownerId)?.get(instanceId);
+    try {
+      const values = instance?.getFrequencyData?.();
+      return values == null ? undefined : new Float32Array(values);
+    } catch {
+      return undefined;
+    }
   }
 
   async initialize() {
@@ -219,13 +250,31 @@ export class AudioEngine {
       Tone.Destination.volume.value = volume === 0 ? -Infinity : 20 * Math.log10(volume);
   }
   
+  private applyHostTrackAudibility(): void {
+    const states = [...this.trackStoreMuteStates.keys()].map(id => ({
+      id,
+      isMuted: this.trackAutomationMuteStates.get(id) ?? this.trackStoreMuteStates.get(id) ?? false,
+      isSolo: this.trackAutomationSoloStates.get(id) ?? this.trackStoreSoloStates.get(id) ?? false,
+    }));
+    const audibility = resolveTrackAudibility(states);
+    for (const [trackId, gate] of this.trackAudibilityGains) {
+      gate.gain.value = audibility.get(trackId) ? 1 : 0;
+    }
+  }
+
   syncTracks(tracks: Track[]) {
+    for (const track of tracks) {
+      this.trackStoreMuteStates.set(track.id, track.isMuted);
+      this.trackStoreSoloStates.set(track.id, track.isSolo);
+    }
+    const hasSolo = tracks.some(track => track.isSolo);
     const activeTrackIds = new Set(tracks.map(track => track.id));
     for (const trackId of this.channels.keys()) {
       if (activeTrackIds.has(trackId)) continue;
       this.synths.get(trackId)?.dispose();
       this.trackEffectInstances.get(trackId)?.forEach(instance => instance.dispose());
       this.trackInputs.get(trackId)?.dispose();
+      this.trackAudibilityGains.get(trackId)?.dispose();
       this.channels.get(trackId)?.dispose();
       this.meters.get(trackId)?.dispose();
       this.reverbs.get(trackId)?.dispose();
@@ -240,24 +289,32 @@ export class AudioEngine {
       this.instrumentSignatures.delete(trackId);
       this.trackEffectSignatures.delete(trackId);
       this.trackInputs.delete(trackId);
+      this.trackAudibilityGains.delete(trackId);
       this.channels.delete(trackId);
       this.meters.delete(trackId);
       this.reverbs.delete(trackId);
       this.delays.delete(trackId);
+      this.trackStoreMuteStates.delete(trackId);
+      this.trackStoreSoloStates.delete(trackId);
+      this.trackAutomationMuteStates.delete(trackId);
+      this.trackAutomationSoloStates.delete(trackId);
     }
 
     tracks.forEach(track => {
-      const mix = createTrackMixSettings(track);
+      const mix = createTrackMixSettings(track, hasSolo);
       if (!this.channels.has(track.id)) {
         const input = new Tone.Gain(1);
+        const audibility = new Tone.Gain(1);
         const channel = new Tone.Channel();
         const meter = new Tone.Meter();
         const reverb = new Tone.Reverb(2);
         const delay = new Tone.FeedbackDelay("8n", 0.3);
         reverb.wet.value = 0;
         delay.wet.value = 0;
-        input.connect(channel);
+        input.connect(audibility);
+        audibility.connect(channel);
         this.trackInputs.set(track.id, input);
+        this.trackAudibilityGains.set(track.id, audibility);
         this.channels.set(track.id, channel);
         this.meters.set(track.id, meter);
         this.reverbs.set(track.id, reverb);
@@ -310,13 +367,16 @@ export class AudioEngine {
 
       const channel = this.channels.get(track.id)!;
       channel.disconnect?.();
-      for (const instance of this.trackEffectInstances.get(track.id) ?? []) instance.node.disconnect?.();
+      for (const instance of this.trackEffectInstances.get(track.id) ?? []) {
+        if (instance.prepareReconnect) instance.prepareReconnect();
+        else (instance.outputNode ?? instance.node).disconnect?.();
+      }
       delay.disconnect?.();
       reverb.disconnect?.();
       let tail: Tone.ToneAudioNode = channel;
       for (const instance of this.trackEffectInstances.get(track.id) ?? []) {
-        tail.connect(instance.node);
-        tail = instance.node;
+        tail.connect(instance.inputNode ?? instance.node);
+        tail = instance.outputNode ?? instance.node;
       }
       tail.connect(delay);
       delay.connect(reverb);
@@ -324,9 +384,8 @@ export class AudioEngine {
 
       channel.volume.value = mix.volumeDb;
       channel.pan.value = mix.pan;
-      channel.mute = mix.muted;
-      channel.solo = mix.solo;
     });
+    this.applyHostTrackAudibility();
   }
 
   syncRouting(tracks: Track[], buses: Bus[], sends: Send[]): void {
@@ -344,17 +403,21 @@ export class AudioEngine {
     for (const input of this.busInputs.values()) input.dispose();
     for (const channel of this.busChannels.values()) channel.dispose();
     for (const output of this.busOutputs.values()) output.dispose();
+    for (const meter of this.busMeters.values()) meter.dispose();
     this.sendGains.clear();
     this.busEffectInstances.clear();
+    this.busEffectInstancesById.clear();
     this.busEffectNodes.clear();
     this.busInputs.clear();
     this.busChannels.clear();
     this.busOutputs.clear();
+    this.busMeters.clear();
 
     for (const bus of buses) {
       const input = new Tone.Gain(1);
       const channel = new Tone.Channel();
       const output = new Tone.Gain(1);
+      const meter = new Tone.Meter();
       channel.volume.value = bus.volume === 0 ? -Infinity : 20 * Math.log10(bus.volume);
       channel.pan.value = bus.pan;
       channel.mute = bus.isMuted;
@@ -363,18 +426,22 @@ export class AudioEngine {
       let tail: Tone.ToneAudioNode = channel;
       const descriptors = bus.effectPlugins
         ?? bus.effects.map(legacyEffectToPluginDescriptor);
-      const effects = instantiateEffectChain(descriptors, this.pluginRegistry).map(plugin => plugin.instance);
+      const instantiatedEffects = instantiateEffectChain(descriptors, this.pluginRegistry);
+      const effects = instantiatedEffects.map(plugin => plugin.instance);
       const effectNodes: Tone.ToneAudioNode[] = [];
       for (const effect of effects) {
-        tail.connect(effect.node);
-        tail = effect.node;
+        tail.connect(effect.inputNode ?? effect.node);
+        tail = effect.outputNode ?? effect.node;
         effectNodes.push(effect.node);
       }
       tail.connect(output);
+      output.connect(meter);
       this.busInputs.set(bus.id, input);
       this.busChannels.set(bus.id, channel);
       this.busOutputs.set(bus.id, output);
+      this.busMeters.set(bus.id, meter);
       this.busEffectInstances.set(bus.id, effects);
+      this.busEffectInstancesById.set(bus.id, new Map(instantiatedEffects.map(plugin => [plugin.descriptor.id, plugin.instance])));
       this.busEffectNodes.set(bus.id, effectNodes);
     }
 
@@ -382,11 +449,11 @@ export class AudioEngine {
       if (id === 'destination') return Tone.Destination;
       const trackMatch = /^track:(.+):(pre|post)$/.exec(id);
       if (trackMatch) return trackMatch[2] === 'pre'
-        ? this.trackInputs.get(trackMatch[1])
+        ? this.trackAudibilityGains.get(trackMatch[1])
         : this.meters.get(trackMatch[1]);
       const busMatch = /^bus:(.+):(input|pre|post)$/.exec(id);
       if (busMatch) return busMatch[2] === 'post'
-        ? this.busOutputs.get(busMatch[1])
+        ? this.busMeters.get(busMatch[1])
         : this.busInputs.get(busMatch[1]);
       return undefined;
     };
@@ -584,6 +651,34 @@ export class AudioEngine {
    * Clears previous automation schedules for the given tracks.
    */
   syncAutomation(tracks: Track[]) {
+    const signature = JSON.stringify(tracks.map(track => [track.id, track.automationLanes]));
+    if (signature === this.automationSignature) return;
+    this.automationSignature = signature;
+
+    const automatedMuteTracks = new Set<string>();
+    const automatedSoloTracks = new Set<string>();
+    for (const track of tracks) {
+      for (const lane of track.automationLanes ?? []) {
+        if (!lane.enabled || lane.points.length === 0) continue;
+        const target = parseAutomationTarget(lane.target);
+        if (target?.kind !== 'track') continue;
+        if (target.parameter === 'mute') automatedMuteTracks.add(track.id);
+        else automatedSoloTracks.add(track.id);
+      }
+    }
+    let audibilityChanged = false;
+    for (const trackId of this.trackAutomationMuteStates.keys()) {
+      if (automatedMuteTracks.has(trackId)) continue;
+      this.trackAutomationMuteStates.delete(trackId);
+      audibilityChanged = true;
+    }
+    for (const trackId of this.trackAutomationSoloStates.keys()) {
+      if (automatedSoloTracks.has(trackId)) continue;
+      this.trackAutomationSoloStates.delete(trackId);
+      audibilityChanged = true;
+    }
+    if (audibilityChanged) this.applyHostTrackAudibility();
+
     // Clear all previous automation schedules
     for (const [, ids] of this.automationScheduleIds) {
       for (const id of ids) {
@@ -680,10 +775,10 @@ export class AudioEngine {
     value: number,
   ): void {
     if (target.kind === 'track') {
-      const channel = this.channels.get(track.id);
-      if (!channel) return;
-      if (target.parameter === 'mute') channel.mute = value >= 0.5;
-      else channel.solo = value >= 0.5;
+      if (!this.channels.has(track.id)) return;
+      if (target.parameter === 'mute') this.trackAutomationMuteStates.set(track.id, value >= 0.5);
+      else this.trackAutomationSoloStates.set(track.id, value >= 0.5);
+      this.applyHostTrackAudibility();
       return;
     }
 

@@ -107,12 +107,16 @@ export function validateRoutingGraph(
     }
   }
 
+  const sendEdges = new Set<string>();
   for (const send of sends) {
     const sourceCount = Number(send.sourceTrackId != null) + Number(send.sourceBusId != null);
     if (sourceCount !== 1) throw new Error(`Send ${send.id} must have exactly one source`);
     if (send.sourceTrackId != null && !trackIds.has(send.sourceTrackId)) throw new Error(`Send ${send.id} has a dangling track source`);
     if (send.sourceBusId != null && !busIds.has(send.sourceBusId)) throw new Error(`Send ${send.id} has a dangling bus source`);
     if (!busIds.has(send.targetBusId)) throw new Error(`Send ${send.id} has a dangling target bus`);
+    const semanticKey = `${send.sourceTrackId ?? ''}\u0000${send.sourceBusId ?? ''}\u0000${send.targetBusId}\u0000${send.preFader}`;
+    if (sendEdges.has(semanticKey)) throw new Error(`Send ${send.id} duplicates another send`);
+    sendEdges.add(semanticKey);
     if (!Number.isFinite(send.gain) || send.gain < 0 || send.gain > 1 || typeof send.preFader !== 'boolean') {
       throw new Error(`Invalid send ${send.id}`);
     }

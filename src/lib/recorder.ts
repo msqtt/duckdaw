@@ -16,46 +16,67 @@ export class MicRecorder {
     analyserData: Float32Array<ArrayBuffer> | null = null;
     startedAt = 0;
     
+    private releaseInput() {
+        try {
+            this.userMedia?.close();
+        } catch {
+            // Preserve the original recording error while continuing cleanup.
+        }
+        this.nativeStream?.getTracks().forEach(track => track.stop());
+        this.nativeAnalyser?.disconnect();
+        this.nativeStream = null;
+        this.nativeAnalyser = null;
+        this.analyserData = null;
+        this.inputMeter?.dispose();
+        this.inputMeter = null;
+    }
+
     async start(deviceId?: string) {
-        if (!this.userMedia) {
-            this.userMedia = new Tone.UserMedia();
-        }
-        // If a specific device is requested, use native getUserMedia with exact deviceId
-        if (deviceId) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { deviceId: { exact: deviceId } },
-          });
-          this.nativeStream = stream;
-          const ctx = Tone.getContext().rawContext as AudioContext;
-          const source = ctx.createMediaStreamSource(stream);
-          this.nativeAnalyser = ctx.createAnalyser();
-          this.nativeAnalyser.fftSize = 1024;
-          this.analyserData = new Float32Array(this.nativeAnalyser.fftSize);
-          const dest = ctx.createMediaStreamDestination();
-          source.connect(this.nativeAnalyser);
-          source.connect(dest);
-          this.mediaRecorder = new MediaRecorder(dest.stream);
-        } else {
-          await this.userMedia.open();
-          this.inputMeter?.dispose();
-          this.inputMeter = new Tone.Meter();
-          this.userMedia.connect(this.inputMeter);
-          // Connect to a destination that MediaRecorder can use
-          const dest = Tone.context.createMediaStreamDestination();
-          this.userMedia.connect(dest);
-          this.mediaRecorder = new MediaRecorder(dest.stream);
-        }
-        
-        this.chunks = [];
-        this.startedAt = performance.now();
-        
-        this.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                this.chunks.push(e.data);
+        try {
+            if (!this.userMedia) {
+                this.userMedia = new Tone.UserMedia();
             }
-        };
-        
-        this.mediaRecorder.start();
+            // If a specific device is requested, use native getUserMedia with exact deviceId
+            if (deviceId) {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { deviceId: { exact: deviceId } },
+              });
+              this.nativeStream = stream;
+              const ctx = Tone.getContext().rawContext as AudioContext;
+              const source = ctx.createMediaStreamSource(stream);
+              this.nativeAnalyser = ctx.createAnalyser();
+              this.nativeAnalyser.fftSize = 1024;
+              this.analyserData = new Float32Array(this.nativeAnalyser.fftSize);
+              const dest = ctx.createMediaStreamDestination();
+              source.connect(this.nativeAnalyser);
+              source.connect(dest);
+              this.mediaRecorder = new MediaRecorder(dest.stream);
+            } else {
+              await this.userMedia.open();
+              this.inputMeter?.dispose();
+              this.inputMeter = new Tone.Meter();
+              this.userMedia.connect(this.inputMeter);
+              // Connect to a destination that MediaRecorder can use
+              const dest = Tone.context.createMediaStreamDestination();
+              this.userMedia.connect(dest);
+              this.mediaRecorder = new MediaRecorder(dest.stream);
+            }
+
+            this.chunks = [];
+            this.startedAt = performance.now();
+
+            this.mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    this.chunks.push(e.data);
+                }
+            };
+
+            this.mediaRecorder.start();
+        } catch (error) {
+            this.releaseInput();
+            this.mediaRecorder = null;
+            throw error;
+        }
     }
 
     getInputLevelDb(): number {
@@ -72,28 +93,32 @@ export class MicRecorder {
     }
     
     async stop(): Promise<MicRecordingResult | null> {
-        return new Promise((resolve) => {
-            if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
+        return new Promise((resolve, reject) => {
+            const mediaRecorder = this.mediaRecorder;
+            if (!mediaRecorder || mediaRecorder.state === "inactive") {
+                this.releaseInput();
+                this.mediaRecorder = null;
                 resolve(null);
                 return;
             }
-            
-            this.mediaRecorder.onstop = () => {
-                const mimeType = this.mediaRecorder?.mimeType || "audio/webm";
+
+            mediaRecorder.onstop = () => {
+                const mimeType = mediaRecorder.mimeType || "audio/webm";
                 const blob = new Blob(this.chunks, { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 const durationSeconds = Math.max(0.01, (performance.now() - this.startedAt) / 1000);
-                this.userMedia?.close();
-                this.nativeStream?.getTracks().forEach(track => track.stop());
-                this.nativeStream = null;
-                this.nativeAnalyser = null;
-                this.analyserData = null;
-                this.inputMeter?.dispose();
-                this.inputMeter = null;
+                this.releaseInput();
+                this.mediaRecorder = null;
                 resolve({ url, mimeType, durationSeconds });
             };
-            
-            this.mediaRecorder.stop();
+
+            try {
+                mediaRecorder.stop();
+            } catch (error) {
+                this.releaseInput();
+                this.mediaRecorder = null;
+                reject(error);
+            }
         });
     }
 }

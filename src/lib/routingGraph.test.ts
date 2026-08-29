@@ -72,6 +72,15 @@ describe('routing graph DAG', () => {
       sends: [{ id: 's', sourceTrackId: 'track', sourceBusId: 'master', targetBusId: 'master', gain: 1, preFader: false }] as Send[],
     },
     {
+      name: 'duplicate semantic sends',
+      tracks: [track('track', 'master')],
+      buses: [bus('master', null)],
+      sends: [
+        { id: 's1', sourceTrackId: 'track', targetBusId: 'master', gain: 0.5, preFader: true },
+        { id: 's2', sourceTrackId: 'track', targetBusId: 'master', gain: 0.75, preFader: true },
+      ] as Send[],
+    },
+    {
       name: 'duplicate IDs',
       tracks: [] as RoutingTrack[],
       buses: [bus('master', null), bus('master', null)],

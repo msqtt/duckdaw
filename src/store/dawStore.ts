@@ -6,6 +6,7 @@ import { transformNotes } from '../lib/midiEditing';
 import { type TempoPoint, validateTempoMap, createDefaultTempoMap } from '../lib/tempoMap';
 import { type AutomationPoint, type AutomationLane, type AutomationTarget, type AutomationCurve, type AutomationBinding, normalizeAutomationLane } from '../lib/automation';
 import { createDefaultRouting, validateRoutingGraph, type Bus, type Send } from '../lib/routingGraph';
+import { planRoutingConnection, type RoutingSourcePort } from '../lib/routingPatch';
 
 import {
   legacyEffectToPluginDescriptor,
@@ -239,6 +240,7 @@ export interface DAWState extends PersistedProjectState {
   updateBus: (busId: string, updates: Partial<Omit<Bus, 'id'>>) => void;
   deleteBus: (busId: string) => void;
   setTrackOutputBus: (trackId: string, busId: string) => void;
+  connectRoutingPort: (source: RoutingSourcePort, targetBusId: string) => void;
   addSend: (send: Omit<Send, 'id'>) => void;
   updateSend: (sendId: string, updates: Partial<Omit<Send, 'id'>>) => void;
   deleteSend: (sendId: string) => void;
@@ -894,7 +896,7 @@ export const dawStore = createStore<DAWState>()(
           isDirty: true,
         };
       }),
-      toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording, isPlaying: !state.isMicRecording ? true : state.isPlaying })),
+      toggleMicRecording: () => set((state) => ({ isMicRecording: !state.isMicRecording })),
       
       addMarker: (position, name = 'Marker') => set((state) => ({
         markers: [...state.markers, { id: generateId(), name, position, color: getRandomColor() }],
@@ -1219,7 +1221,46 @@ export const dawStore = createStore<DAWState>()(
         }
       }),
 
+      connectRoutingPort: (source, targetBusId) => {
+        const state = get();
+        try {
+          const rootBusId = state.buses.find(bus => bus.outputBusId == null)?.id;
+          if (!rootBusId) return;
+          const tracks = state.tracks.map(track => ({
+            id: track.id,
+            outputBusId: track.outputBusId ?? rootBusId,
+          }));
+          const plan = planRoutingConnection(tracks, state.buses, state.sends, source, targetBusId, generateId());
+          if (plan.kind === 'track-output') {
+            set({
+              tracks: state.tracks.map(track => track.id === plan.trackId
+                ? { ...track, outputBusId: plan.targetBusId }
+                : track),
+              isDirty: true,
+            });
+            return;
+          }
+          if (plan.kind === 'bus-output') {
+            set({
+              buses: state.buses.map(bus => bus.id === plan.busId
+                ? { ...bus, outputBusId: plan.targetBusId }
+                : bus),
+              isDirty: true,
+            });
+            return;
+          }
+          set({ sends: [...state.sends, plan.send], isDirty: true });
+        } catch {
+          // Invalid, duplicate and cyclic patches are zero-commit no-ops.
+        }
+      },
+
       addSend: (sendData) => set((state) => {
+        const duplicate = state.sends.some(send => send.sourceTrackId === sendData.sourceTrackId
+          && send.sourceBusId === sendData.sourceBusId
+          && send.targetBusId === sendData.targetBusId
+          && send.preFader === sendData.preFader);
+        if (duplicate) return state;
         const sends = [...state.sends, { ...sendData, id: generateId() }];
         try {
           const routing = validateRoutingGraph(state.tracks, state.buses, sends);
@@ -1229,16 +1270,24 @@ export const dawStore = createStore<DAWState>()(
         }
       }),
 
-      updateSend: (sendId, updates) => set((state) => {
-        if (!state.sends.some(send => send.id === sendId)) return state;
+      updateSend: (sendId, updates) => {
+        const state = get();
+        if (!state.sends.some(send => send.id === sendId)) return;
         const sends = state.sends.map(send => send.id === sendId ? { ...send, ...updates } : send);
+        const candidate = sends.find(send => send.id === sendId)!;
+        const duplicate = sends.some(send => send.id !== sendId
+          && send.sourceTrackId === candidate.sourceTrackId
+          && send.sourceBusId === candidate.sourceBusId
+          && send.targetBusId === candidate.targetBusId
+          && send.preFader === candidate.preFader);
+        if (duplicate) return;
         try {
           const routing = validateRoutingGraph(state.tracks, state.buses, sends);
-          return { sends: routing.sends, isDirty: true };
+          set({ sends: routing.sends, isDirty: true });
         } catch {
-          return state;
+          // Invalid, duplicate and cyclic updates are zero-commit no-ops.
         }
-      }),
+      },
 
       deleteSend: (sendId) => set((state) => {
         if (!state.sends.some(send => send.id === sendId)) return state;

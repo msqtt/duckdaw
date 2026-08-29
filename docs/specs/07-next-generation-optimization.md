@@ -176,7 +176,10 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 - `enumerateMidiInputs()` / `selectMidiInput(id)`；
 - `enumerateAudioInputs()` / `selectAudioInput(id)`；
 - `startRecording({ countInBars, preRollBars, mode })`；
+- `startAudioRecordingWithPlayback({ startCapture, getCurrentBeat, isPlaybackActive, startPlayback })`：成功顺序固定为 capture active → sample beat → 必要时 start Transport；已播放时不重启，capture 失败时不启动播放；
 - `commitTake(recording)` / `setActiveTake(clipId, takeId)`。
+
+**REC-PRO-05** 冻结 Audio Track accompaniment recording：录音状态本身不得伪造 `isPlaying`；从停止状态开始录音时，在采集真正 active 后启动 Transport，其他 Track 继续按实时图播放；已播放时不得中断/重启 Transport，且起点按授权完成后的当前 beat 对齐。停止录音不停止播放，全局 Stop 除外。Count-in 取消、权限失败、无效目标不得延迟启动采集或创建 Clip；所有输入资源按 FR-AUD-02 释放。该增量不新增持久字段、不改变 package 版本，也不承诺输入直通监听。
 
 随机 Humanize 必须接受可注入 RNG/seed，测试和重复导出可确定。
 
@@ -274,6 +277,7 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | REC-PRO-02 | 1/2/4 bar Count-in 与 Pre-roll | fake transport test |
 | REC-PRO-03 | 输入电平与 clipping 公告 | meter test |
 | REC-PRO-04 | Overdub/Takes 与一次 undo | recording transaction test |
+| REC-PRO-05 | Audio Track 边播放边录制、起点对齐、停止后继续播放 | `audioRecording.test.ts` + `REC-E2E-05` |
 
 ### Batch E：Automation、Tempo、混音与导出（格式 1.2→2.0）
 
@@ -288,6 +292,18 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | EXPORT-03 | Master limiter/normalize | peak/RMS test |
 | EXPORT-04 | Stems 和 master 一致性 | stems sum difference test |
 | FORMAT-02 | v1.x→v2.0 迁移 | semantic roundtrip test |
+
+### Batch E2：可视化混音与参数 EQ（格式保持 2.1）
+
+状态：**已实现并验证**。全量 Vitest 53 files/336 tests、三浏览器 Playwright 36/36、typecheck/build/bundle/audit/diff 全部通过；最终独立复审 **PASS，无 P0/P1**。
+
+| ID | 需求 | 核心测试 |
+|---|---|---|
+| MIX-ROUTE-03 | 节点/连线图显示 Track、Bus、Destination；OUT/PRE/POST→IN 创建 Output/Send；Bus 是完整可挂插件聚合通道 | `routingPatch.test.ts`, `routingStore.test.ts`, `MIX-E2E-03` |
+| MIX-SOLO-01 | 宿主集中计算 Solo audibility，禁止 Tone 全局 Solo 静音 Bus；实时/Automation/离线一致 | `mixSettings.test.ts`, `audioEngineRouting.test.ts`, `audioEngineAutomation.test.ts` |
+| PLUG-EQ-01 | 最多 8 点可视化 parametric EQ、实时 FFT、共享 factory、持久化和完整释放 | `parametricEq.test.ts`, `audioEnginePlugin.test.ts`, `pluginPersistence.test.ts`, `MIX-E2E-03` |
+
+边界合同：连接候选必须先经 `validateRoutingGraph`，非法/环/重复连接零提交；有效连接和 EQ 单手势各一个 undo step。频谱 API 缺失时只隐藏动态 spectrum，不 bypass EQ。格式保持 `2.1.0`，EQ 仅使用现有 number descriptor，旧/未知 descriptor 往返规则不变。浏览器验收覆盖 pointer 与键盘端口连接、Bus 新建/聚合/挂 EQ、点增删拖拽、undo/redo、Solo 经 Bus 发声及 unsupported analyser fallback。
 
 ### Batch F：GitHub、E2E、CI/CD 与发布
 
@@ -332,8 +348,9 @@ v1.x→v2：现有 BPM 生成 beat 0 的 step TempoPoint；生成唯一 Master B
 | A 性能与稳定性 | 已实现：增量 recovery、clip diff、256 MiB decode cache、Arrange/Piano 二维裁剪、selector、lazy/vendor chunks、同源 FFmpeg、User Timing 与 size gate | 1.1.0 | 0.2.0-alpha.1 |
 | B 交互与可访问性 | 已实现：统一 DecisionHost、恢复三选项、GitHub 409 四路决策与恢复快照、快捷键注册表/帮助、空状态 CTA、Toast/导出进度 ARIA、Mixer/时间轴滑杆语义、ConfirmModal 焦点管理 | 1.1.0 | 0.2.0-alpha.2 |
 | C 基础音频编辑 | 已实现：v1.2 audioEdit migration/validation；Audio/MIDI Split；Audio Trim/Offset、Gain、Fade、Reverse；共享 Blob 所有权；实时/离线共用 playback plan；菜单、快捷键和波形反馈 | 1.2.0 | 0.2.0-beta.1 |
-| D MIDI 与专业录音 | 已实现：SMF Type 0/1 import/export 实际按钮（Settings），导入写入 tracks/clips、导出当前 MIDI 下载；Velocity Lane pointer-drag 编辑（pause/resume 单 undo）；Transpose/Humanize/Legato toolbar 按钮接入 transformNotesInClip；MIDI/Audio 设备枚举 select 传 exact deviceId 给 connectMidiInputs/getUserMedia（unsupported 可见降级）；0/1/2/4 bar count-in 用户可配置并实际延迟录音启动（aria-live 倒计时）；InputMeter 挂载接收 MIDI noteOn velocity 和麦克风 dBFS analyser（clipping aria-live、原始流停止释放）；overdub 检测 existing clip 自动调用 commitOverdubRecording；Takes 可在 ClipItem 切换（switchTake） | 1.2.0 | 0.2.0-beta.2 |
+| D MIDI 与专业录音 | 已实现：SMF Type 0/1 import/export 实际按钮（Settings），导入写入 tracks/clips、导出当前 MIDI 下载；Velocity Lane pointer-drag 编辑（pause/resume 单 undo）；Transpose/Humanize/Legato toolbar 按钮接入 transformNotesInClip；MIDI/Audio 设备枚举 select 传 exact deviceId 给 connectMidiInputs/getUserMedia（unsupported 可见降级）；0/1/2/4 bar count-in 用户可配置并实际延迟录音启动（aria-live 倒计时）；REC-PRO-05 Audio Track 在 MediaRecorder active 后从当前 beat 边播放边录制，已播放不重启，停止录音继续播放，Count-in 失败/取消恢复原播放状态和播放头；InputMeter 挂载接收 MIDI noteOn velocity 和麦克风 dBFS analyser（clipping aria-live、原始流停止释放）；overdub 检测 existing clip 自动调用 commitOverdubRecording；Takes 可在 ClipItem 切换（switchTake）；完整本地门禁与独立复审 PASS，无 P0/P1 | 1.2.0 | 0.2.0-beta.2 |
 | E Automation/Tempo/Mix/Export | 已实现并验证：step/linear Tempo Map 精确积分/逆解；Automation 校验、UI、undo 与实时/离线调度；v2 Master Bus/Bus/Send DAG、共享 Mix Graph；动态 Tempo export、0..30s tail、normalize→limiter→encode、PCM16 WAV 与 Track stems；v1.x 原子迁移 | 2.0.0 | 0.3.0-rc.1 |
+| E2 可视化混音与参数 EQ | 已实现并验证：OUT/PRE/POST→IN 可视化路由、完整聚合 Bus、宿主集中 Solo gate 与 Automation override 生命周期、8-band 频谱参数 EQ、unsupported analyser fallback；完整本地门禁与独立复审 PASS，无 P0/P1 | 2.1.0 | 0.4.0 |
 | F E2E/CI/CD/Release | 已实现并验证：GitHub baseline SHA/409 四路原子事务；exact 依赖与 0 audit；Chromium/Firefox/WebKit 18/18 产品 E2E；axe serious/critical；CI、Netlify staging context、部署 metadata、staging smoke 与 manual release workflow；FFmpeg notice/GPL/source 随部署并由 smoke 验证 | 2.0.0 | 0.3.0-rc.1 |
 | G Browser Plugin SDK | 核心与 PLUG-UI-01 已实现；完整本地门禁与独立复审 PASS，无 P0/P1 | 2.1.0 | 0.4.0 |
 | H 通用控件 Automation | AUTO-02 已实现；domain/store/audio/package、三浏览器真实控件→曲线→plugin→offline 路径及独立复审全部通过，无 P0/P1 | 2.1.0 optional extension | 0.4.0 |

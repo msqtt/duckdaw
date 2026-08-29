@@ -44,7 +44,11 @@ export interface InstrumentPluginInstance {
 
 export interface EffectPluginInstance {
   node: Tone.ToneAudioNode;
+  inputNode?: Tone.ToneAudioNode;
+  outputNode?: Tone.ToneAudioNode;
+  prepareReconnect?: () => void;
   setParameters: (parameters: Record<string, PluginParameterValue>) => void;
+  getFrequencyData?: () => Float32Array | undefined;
   dispose: () => void;
 }
 
